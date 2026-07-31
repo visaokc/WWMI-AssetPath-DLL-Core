@@ -19,6 +19,23 @@ automation.
 The root commit contains only the upstream files needed by the `DirectX11`
 project and its direct build dependencies.
 
+## Stable Asset Path build
+
+The second commit adds the currently validated WWMI Asset Path implementation:
+
+- always-on Asset Path identity capture
+- streaming texture hash collection
+- F7 backup-copy INI migration mode
+- Shift+F7 aggressive in-place INI migration mode
+- legacy hash-to-Asset-Path migration
+- bounded observation history and ambiguity-safe hash emission
+
+Validated stable `d3d11.dll` SHA256:
+
+```text
+ED8E4AF3FEB95914E6F90DD80B49BEA3166660670A6149620F180536E6C9E0B7
+```
+
 ## Build
 
 Requirements:
@@ -41,4 +58,3 @@ x64\Release\d3d11.dll
 MSVC and the linker do not produce byte-for-byte reproducible output for this
 project. A rebuilt DLL can therefore have a different SHA256 despite identical
 source.
-

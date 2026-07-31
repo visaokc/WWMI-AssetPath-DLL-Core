@@ -7,8 +7,8 @@
 
 #include "CommandList.h"
 
+#include "HackerInputLayout.h"
 #include "HackerDevice.h"
-//#include "ResourceHash.h"
 #include "Globals.h"
 
 // {A3046B1E-336B-4D90-9FD6-234BC09B8687}
@@ -135,6 +135,10 @@ private:
 	UINT mCurrentPSUAVStartSlot;
 	UINT mCurrentPSNumUAVs;
 
+	HackerInputLayout* mCurrentInputLayout;
+	HackerInputLayout* mOriginalInputLayout;
+	HackerInputLayout* mOverrideInputLayout;
+
 	// Used for deny_cpu_read, track_texture_updates and constant buffer matching
 	typedef std::unordered_map<ID3D11Resource*, MappedResourceInfo> MappedResources;
 	MappedResources mMappedResources;
@@ -236,6 +240,10 @@ public:
 	virtual void FrameAnalysisTrigger(FrameAnalysisOptions new_options) {};
 	virtual void FrameAnalysisDump(ID3D11Resource *resource, FrameAnalysisOptions options,
 		const wchar_t *target, DXGI_FORMAT format, UINT stride, UINT offset) {};
+
+	void DeferInputLayoutOverride(HackerInputLayout* pInputLayout);
+	void OverrideInputLayout();
+	void RestoreInputLayout();
 
 	// These are the shaders the game has set, which may be different from
 	// the ones we have bound to the pipeline:

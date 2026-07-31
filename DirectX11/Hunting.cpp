@@ -19,6 +19,8 @@
 #include "profiling.h"
 #include "FrameAnalysis.h"
 #include "ShaderRegex.h"
+#include "AssetPathTextureIdentity.h"
+#include "AssetHashCapture.h"
 
 // bo3b: For this routine, we have a lot of warnings in x64, from converting a size_t result into the needed
 //  DWORD type for the Write calls.  These are writing 256 byte strings, so there is never a chance that it 
@@ -274,10 +276,6 @@ void DumpUsage(wchar_t *dir)
 
 // Make a snapshot of the backbuffer, with the current shader disabled, as a good piece
 // of documentation.  The name will include the hash code, making a direct shader reference.
-//
-// CoInitialize must be called for WIC to work.  We can call it multiple times, it will
-// return the S_FALSE if it's already inited.
-
 template <typename HashType>
 static void SimpleScreenShot(HackerDevice *pDevice, HashType hash, char *shaderType)
 {
@@ -291,19 +289,18 @@ static void SimpleScreenShot(HackerDevice *pDevice, HashType hash, char *shaderT
 		return;
 	}
 
-	HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-	if (FAILED(hr))
-		LogInfo("*** Overlay call CoInitializeEx failed: %d\n", hr);
+	// CoInitialize must be called for WIC to work.  We can call it multiple times, it will
+	// return the S_FALSE if it's already inited.
+	if (!EnsureCOM())
+		LogInfo("*** Overlay call CoInitializeEx failed\n");
 
-	hr = mHackerSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBuffer);
+	HRESULT hr = mHackerSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBuffer);
 	if (SUCCEEDED(hr))
 	{
 		swprintf_s(fullName, MAX_PATH, L"%ls\\%0*llx-%S.jpg", G->SHADER_PATH, hash_len, (UINT64)hash, shaderType);
 		hr = DirectX::SaveWICTextureToFile(pDevice->GetPassThroughOrigContext1(), backBuffer, GUID_ContainerFormatJpeg, fullName);
 		backBuffer->Release();
 	}
-
-	CoUninitialize();
 
 	LogInfoW(L"  SimpleScreenShot on Mark: %s, result: %d\n", fullName, hr);
 }
@@ -1976,6 +1973,8 @@ void ParseHuntingSection()
 	// find the effect again later.
 	G->config_reloadable = RegisterIniKeyBinding(L"Hunting", L"reload_config", FlagConfigReload, NULL, noRepeat, NULL);
 	G->config_reloadable = RegisterIniKeyBinding(L"Hunting", L"wipe_user_config", FlagConfigReload, NULL, noRepeat, (void*)true);
+	RegisterIniKeyBinding(L"Hunting", L"toggle_asset_hash_capture", ToggleAssetHashCapture, NULL, noRepeat, NULL);
+	RegisterIniKeyBinding(L"Hunting", L"toggle_aggressive_asset_hash_capture", ToggleAggressiveAssetHashCapture, NULL, noRepeat, NULL);
 
 	// We're interested in performance measurements even in release mode
 	// (possibly even especially in release mode), particularly if we want
@@ -2063,6 +2062,9 @@ void ParseHuntingSection()
 			(FrameAnalysisOptionNames, buf, NULL);
 	} else
 		G->def_analyse_options = FrameAnalysisOptions::INVALID;
+	SetAssetPathFrameAnalysisEnabled(
+		!!(G->def_analyse_options &
+			FrameAnalysisOptions::ASSET_PATH));
 
 	// Quick hacks to see if DX11 features that we only have limited support for are responsible for anything important:
 	RegisterIniKeyBinding(L"Hunting", L"kill_deferred", DisableDeferred, EnableDeferred, noRepeat, NULL);

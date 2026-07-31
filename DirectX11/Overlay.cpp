@@ -14,6 +14,7 @@
 #include "D3D11Wrapper.h"
 #include "Globals.h"
 #include "profiling.h"
+#include "AssetHashCapture.h"
 
 #include "HackerDevice.h"
 #include "HackerContext.h"
@@ -789,7 +790,9 @@ void Overlay::DrawOverlay(void)
 	Profiling::State profiling_state;
 	HRESULT hr;
 
-	if (G->hunting != HUNTING_MODE_ENABLED && !has_notice && Profiling::mode == Profiling::Mode::NONE)
+	if (G->hunting != HUNTING_MODE_ENABLED && !has_notice &&
+			!AssetHashCaptureStatusVisible() &&
+			Profiling::mode == Profiling::Mode::NONE)
 		return;
 
 	if (Profiling::mode == Profiling::Mode::SUMMARY)
@@ -810,6 +813,20 @@ void Overlay::DrawOverlay(void)
 			Vector2 strSize;
 			Vector2 textPosition;
 			float y = 10.0f;
+
+			if (AssetHashCaptureStatusVisible()) {
+				const wchar_t *capture_status = AssetHashCaptureStatusText();
+				strSize = mFont->MeasureString(capture_status);
+				textPosition = Vector2(float(mResolution.x - strSize.x) / 2, y);
+				DrawOutlinedString(
+					mFont.get(),
+					capture_status,
+					textPosition,
+					AssetHashCaptureEnabled()
+						? DirectX::Colors::LimeGreen
+						: DirectX::Colors::OrangeRed);
+				y += strSize.y;
+			}
 
 			if (G->hunting == HUNTING_MODE_ENABLED) {
 				// Top of screen

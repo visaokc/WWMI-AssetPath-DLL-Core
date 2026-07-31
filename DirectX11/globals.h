@@ -182,6 +182,7 @@ enum class FrameAnalysisOptions {
 	DEFRD_CTX_DELAY = 0x00800000,
 	DEFRD_CTX_MASK  = 0x00c00000,
 	SYMLINK         = 0x01000000,
+	ASSET_PATH      = 0x02000000,
 	DEPRECATED      = (signed)0x80000000,
 };
 SENSIBLE_ENUM(FrameAnalysisOptions);
@@ -223,6 +224,7 @@ static EnumName_t<wchar_t *, FrameAnalysisOptions> FrameAnalysisOptionNames[] = 
 	{L"deferred_ctx_accurate", FrameAnalysisOptions::DEFRD_CTX_DELAY},
 	{L"share_dupes", FrameAnalysisOptions::SHARE_DEDUPED},
 	{L"symlink", FrameAnalysisOptions::SYMLINK},
+	{L"asset_path", FrameAnalysisOptions::ASSET_PATH},
 
 	// Legacy combo options:
 	{L"dump_rt_jps", FrameAnalysisOptions::DUMP_RT_JPS},
@@ -274,6 +276,8 @@ typedef std::unordered_map<UINT64, struct ShaderOverride> ShaderOverrideMap;
 
 struct TextureOverride {
 	std::wstring ini_section;
+	std::wstring asset_path;
+	std::wstring asset_name;
 	int format;
 	int width;
 	int height;
@@ -327,6 +331,8 @@ typedef std::unordered_map<ID3D11Resource *, ResourceHandleInfo> ResourceMap;
 // will sort it in the ini parser when we create the list.
 typedef std::vector<struct TextureOverride> TextureOverrideList;
 typedef std::unordered_map<uint32_t, TextureOverrideList> TextureOverrideMap;
+typedef std::unordered_map<std::wstring, TextureOverrideList> TextureOverridePathMap;
+typedef std::unordered_map<std::wstring, TextureOverrideList> TextureOverrideNameMap;
 
 // We use this when collecting resource info for ShaderUsage.txt to take a
 // snapshot of the resource handle, hash and original hash. We used to just
@@ -406,10 +412,12 @@ struct Globals
 	bool gLogInput;
 	bool gShowWarnings;
 	bool dump_all_profiles;
+	unsigned gSystemTickCount;
 	float gTime;
 	float gSettingsSaveTime;
 	DWORD ticks_at_launch;
 	std::wstring additionalForegroundWindowTitle;
+	const std::wstring gDefaultNamespace = L"d3dx.ini";
 
 	wchar_t SHADER_PATH[MAX_PATH];
 	wchar_t SHADER_CACHE_PATH[MAX_PATH];
@@ -568,6 +576,8 @@ struct Globals
 
 	ShaderOverrideMap mShaderOverrideMap;
 	TextureOverrideMap mTextureOverrideMap;
+	TextureOverridePathMap mTextureOverridePathMap;
+	TextureOverrideNameMap mTextureOverrideNameMap;
 	FuzzyTextureOverrides mFuzzyTextureOverrides;
 
 	std::unordered_map<UINT64, ShaderModelCacheEntry> mShaderModelCache;
@@ -729,6 +739,7 @@ struct Globals
 		gFallbackScreenWidth(0),
 		gFallbackScreenHeight(0),
 		dump_all_profiles(false),
+		gSystemTickCount(0),
 		gTime(0)
 	{
 		int i;
@@ -780,23 +791,46 @@ struct TLS
 
 	LockStack locks_held;
 
+	bool com_initialized;
+
 	TLS() :
-		hooking_quirk_protection(false)
+		hooking_quirk_protection(false),
+		com_initialized(false)
 	{}
 };
 
 extern DWORD tls_idx;
 static struct TLS* get_tls()
 {
-	TLS *tls;
+	TLS* tls = (TLS*)TlsGetValue(tls_idx);
 
-	tls = (TLS*)TlsGetValue(tls_idx);
-	if (!tls) {
+	if (!tls)
+	{
 		tls = new TLS();
 		TlsSetValue(tls_idx, tls);
 	}
 
 	return tls;
+}
+
+inline bool EnsureCOM()
+{
+	TLS* tls = get_tls();
+
+	if (tls->com_initialized)
+		return true;
+
+	HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+
+	if (hr == RPC_E_CHANGED_MODE)
+		return true;
+
+	if (FAILED(hr))
+		return false;
+
+	tls->com_initialized = (hr == S_OK);
+
+	return true;
 }
 
 extern Globals *G;

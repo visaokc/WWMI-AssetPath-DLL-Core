@@ -1,6 +1,9 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <ClCompile Include="AssetPathTextureIdentity.cpp" />
+    <ClCompile Include="AssetHashCapture.cpp" />
+    <ClCompile Include="AssetHashIniDocument.cpp" />
     <ClCompile Include="D3D11Wrapper.cpp" />
     <ClCompile Include="DLLMainHook.cpp" />
     <ClCompile Include="HackerContext.cpp" />
@@ -29,11 +32,15 @@
     <ClCompile Include="lock.cpp" />
     <ClCompile Include="cursor.cpp" />
     <ClCompile Include="Override.cpp" />
+    <ClCompile Include="HackerInputLayout.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="d3d11Wrapper.def" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AssetPathTextureIdentity.h" />
+    <ClInclude Include="AssetHashCapture.h" />
+    <ClInclude Include="AssetHashIniDocument.h" />
     <ClInclude Include="D3D11Wrapper.h" />
     <ClInclude Include="Globals.h" />
     <ClInclude Include="HackerContext.h" />
@@ -62,6 +69,7 @@
     <ClInclude Include="lock.h" />
     <ClInclude Include="cursor.h" />
     <ClInclude Include="Override.h" />
+    <ClInclude Include="HackerInputLayout.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="DirectX11.rc" />

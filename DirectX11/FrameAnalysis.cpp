@@ -507,7 +507,7 @@ ID3D11DeviceContext* FrameAnalysisContext::GetDumpingContext()
 void FrameAnalysisContext::Dump2DResourceImmediateCtx(ID3D11Texture2D *staging,
 		wstring filename, D3D11_TEXTURE2D_DESC *orig_desc, DXGI_FORMAT format)
 {
-	HRESULT hr = S_OK, dont_care;
+	HRESULT hr = S_OK;
 	wchar_t dedupe_filename[MAX_PATH];
 	wstring save_filename;
 	wchar_t *wic_ext = L".jpg";
@@ -523,7 +523,7 @@ void FrameAnalysisContext::Dump2DResourceImmediateCtx(ID3D11Texture2D *staging,
 	}
 
 	// Needs to be called at some point before SaveXXXTextureToFile:
-	dont_care = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+	EnsureCOM();
 
 	if ((analyse_options & FrameAnalysisOptions::FMT_2D_JPS) ||
 	    (analyse_options & FrameAnalysisOptions::FMT_2D_AUTO)) {
@@ -569,8 +569,6 @@ void FrameAnalysisContext::Dump2DResourceImmediateCtx(ID3D11Texture2D *staging,
 			DumpDesc(orig_desc, save_filename.c_str());
 		link_deduplicated_files(filename.c_str(), save_filename.c_str());
 	}
-
-	CoUninitialize();
 }
 
 void FrameAnalysisContext::Dump2DResource(ID3D11Texture2D *resource, wchar_t
@@ -854,19 +852,18 @@ static const char* TopologyStr(D3D11_PRIMITIVE_TOPOLOGY topology)
 
 void FrameAnalysisContext::dedupe_buf_filename_vb_txt(const wchar_t *bin_filename,
 		wchar_t *txt_filename, size_t size, int idx, UINT stride,
-		UINT offset, UINT first, UINT count, ID3DBlob *layout,
+		UINT offset, UINT first, UINT count, HackerInputLayout *layout,
 		D3D11_PRIMITIVE_TOPOLOGY topology, DrawCallInfo *call_info)
 {
 	wchar_t *pos;
 	size_t rem;
-	uint32_t layout_hash;
 
 	copy_until_extension(txt_filename, bin_filename, MAX_PATH, &pos, &rem);
 
 	StringCchPrintfExW(pos, rem, &pos, &rem, NULL, L"-vb%i", idx);
 
 	if (layout) {
-		layout_hash = crc32c_hw(0, layout->GetBufferPointer(), layout->GetBufferSize());
+		uint32_t layout_hash = layout->GetLayoutHash();
 		StringCchPrintfExW(pos, rem, &pos, &rem, NULL, L"-layout=%08x", layout_hash);
 	}
 
@@ -895,7 +892,7 @@ void FrameAnalysisContext::dedupe_buf_filename_vb_txt(const wchar_t *bin_filenam
 		FALogErr(L"Failed to create vertex buffer filename\n");
 }
 
-static void dump_ia_layout(FILE *fd, D3D11_INPUT_ELEMENT_DESC *layout_desc, size_t layout_elements, int slot, bool *per_vert, bool *per_inst)
+static void dump_ia_layout(FILE *fd, const D3D11_INPUT_ELEMENT_DESC *layout_desc, size_t layout_elements, int slot, bool *per_vert, bool *per_inst)
 {
 	UINT i;
 
@@ -1257,7 +1254,7 @@ static int fprint_dxgi_format(FILE *fd, DXGI_FORMAT format, uint8_t *buf)
 
 
 static void dump_vb_elem(FILE *fd, uint8_t *buf,
-		D3D11_INPUT_ELEMENT_DESC *layout_desc, size_t layout_elements,
+		const D3D11_INPUT_ELEMENT_DESC *layout_desc, size_t layout_elements,
 		int slot, UINT vb_idx, UINT elem, UINT stride)
 {
 	UINT offset = 0, alignment, size;
@@ -1295,7 +1292,7 @@ static void dump_vb_elem(FILE *fd, uint8_t *buf,
 }
 
 static void dump_vb_known_layout(FILE *fd, D3D11_MAPPED_SUBRESOURCE *map,
-		D3D11_INPUT_ELEMENT_DESC *layout_desc, size_t layout_elements,
+		const D3D11_INPUT_ELEMENT_DESC *layout_desc, size_t layout_elements,
 		UINT size, int slot, UINT offset, UINT first, UINT count, UINT stride)
 {
 	UINT vertex, elem, start, end;
@@ -1319,7 +1316,7 @@ static void dump_vb_known_layout(FILE *fd, D3D11_MAPPED_SUBRESOURCE *map,
 }
 
 static void dump_vb_instance_data(FILE *fd, D3D11_MAPPED_SUBRESOURCE *map,
-		D3D11_INPUT_ELEMENT_DESC *layout_desc, size_t layout_elements,
+		const D3D11_INPUT_ELEMENT_DESC *layout_desc, size_t layout_elements,
 		UINT size, int slot, UINT offset, UINT first, UINT count, UINT stride)
 {
 	UINT instance, idx, elem, start, end;
@@ -1353,12 +1350,12 @@ static void dump_vb_instance_data(FILE *fd, D3D11_MAPPED_SUBRESOURCE *map,
  * other info like the semantic).
  */
 void FrameAnalysisContext::DumpVBTxt(wchar_t *filename, D3D11_MAPPED_SUBRESOURCE *map,
-		UINT size, int slot, UINT stride, UINT offset, UINT first, UINT count, ID3DBlob *layout,
+		UINT size, int slot, UINT stride, UINT offset, UINT first, UINT count, HackerInputLayout *layout,
 		D3D11_PRIMITIVE_TOPOLOGY topology, DrawCallInfo *call_info)
 {
 	FILE *fd = NULL;
 	errno_t err;
-	D3D11_INPUT_ELEMENT_DESC *layout_desc = NULL;
+	const D3D11_INPUT_ELEMENT_DESC *layout_desc = NULL;
 	size_t layout_elements;
 	bool per_vert = false, per_inst = false;
 
@@ -1382,8 +1379,8 @@ void FrameAnalysisContext::DumpVBTxt(wchar_t *filename, D3D11_MAPPED_SUBRESOURCE
 	if (topology != D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED)
 		fprintf(fd, "topology: %s\n", TopologyStr(topology));
 	if (layout) {
-		layout_desc = (D3D11_INPUT_ELEMENT_DESC*)layout->GetBufferPointer();
-		layout_elements = layout->GetBufferSize() / sizeof(D3D11_INPUT_ELEMENT_DESC);
+		layout_desc = layout->GetElements();
+		layout_elements = layout->GetElementCount();
 		dump_ia_layout(fd, layout_desc, layout_elements, slot, &per_vert, &per_inst);
 	}
 	if (!stride) {
@@ -1564,7 +1561,7 @@ bool FrameAnalysisContext::DeferDump2DResource(ID3D11Texture2D *staging,
 bool FrameAnalysisContext::DeferDumpBuffer(ID3D11Buffer *staging,
 		D3D11_BUFFER_DESC *orig_desc, wchar_t *filename,
 		FrameAnalysisOptions buf_type_mask, int idx, DXGI_FORMAT ib_fmt,
-		UINT stride, UINT offset, UINT first, UINT count, ID3DBlob *layout,
+		UINT stride, UINT offset, UINT first, UINT count, HackerInputLayout *layout,
 		D3D11_PRIMITIVE_TOPOLOGY topology, DrawCallInfo *call_info,
 		ID3D11Buffer *staged_ib_for_vb, UINT ib_off_for_vb)
 {
@@ -1721,7 +1718,7 @@ void FrameAnalysisContext::determine_vb_count(UINT *count, ID3D11Buffer *staged_
 
 void FrameAnalysisContext::DumpBufferImmediateCtx(ID3D11Buffer *staging, D3D11_BUFFER_DESC *orig_desc,
 		wstring filename, FrameAnalysisOptions buf_type_mask, int idx,
-		DXGI_FORMAT ib_fmt, UINT stride, UINT offset, UINT first, UINT count, ID3DBlob *layout,
+		DXGI_FORMAT ib_fmt, UINT stride, UINT offset, UINT first, UINT count, HackerInputLayout *layout,
 		D3D11_PRIMITIVE_TOPOLOGY topology, DrawCallInfo *call_info,
 		ID3D11Buffer *staged_ib_for_vb, UINT ib_off_for_vb)
 {
@@ -1818,7 +1815,7 @@ out_unmap:
 
 void FrameAnalysisContext::DumpBuffer(ID3D11Buffer *buffer, wchar_t *filename,
 		FrameAnalysisOptions buf_type_mask, int idx, DXGI_FORMAT ib_fmt,
-		UINT stride, UINT offset, UINT first, UINT count, ID3DBlob *layout,
+		UINT stride, UINT offset, UINT first, UINT count, HackerInputLayout *layout,
 		D3D11_PRIMITIVE_TOPOLOGY topology, DrawCallInfo *call_info,
 		ID3D11Buffer **staged_ib_ret, ID3D11Buffer *staged_ib_for_vb, UINT ib_off_for_vb)
 {
@@ -1864,6 +1861,91 @@ void FrameAnalysisContext::DumpBuffer(ID3D11Buffer *buffer, wchar_t *filename,
 	staging->Release();
 }
 
+static string JsonString(const wchar_t *value)
+{
+	int size = WideCharToMultiByte(
+		CP_UTF8,
+		0,
+		value,
+		-1,
+		NULL,
+		0,
+		NULL,
+		NULL);
+	if (size <= 0)
+		return string();
+	string utf8(size, '\0');
+	if (!WideCharToMultiByte(
+		CP_UTF8,
+		0,
+		value,
+		-1,
+		&utf8[0],
+		size,
+		NULL,
+		NULL))
+		return string();
+	utf8.pop_back();
+
+	string escaped;
+	for (char c : utf8) {
+		if (c == '\\' || c == '"')
+			escaped += '\\';
+		escaped += c;
+	}
+	return escaped;
+}
+
+static void DumpTextureAssetPathManifest(
+	ID3D11Texture2D *resource,
+	wchar_t *dump_name)
+{
+	wstring asset_path;
+	uint32_t hash = 0;
+	uint32_t original_hash = 0;
+	EnterCriticalSectionPretty(&G->mResourcesLock);
+	auto entry = lookup_resource_handle_info(resource);
+	if (entry != G->mResources.end()) {
+		asset_path = entry->second.asset_path;
+		hash = entry->second.hash;
+		original_hash = entry->second.orig_hash;
+	}
+	LeaveCriticalSection(&G->mResourcesLock);
+
+	if (asset_path.empty())
+		return;
+
+	D3D11_TEXTURE2D_DESC desc;
+	resource->GetDesc(&desc);
+
+	wchar_t manifest_path[MAX_PATH];
+	swprintf_s(
+		manifest_path,
+		MAX_PATH,
+		L"%ls\\TextureAssetManifest.jsonl",
+		G->ANALYSIS_PATH);
+	FILE *manifest = _wfsopen(manifest_path, L"ab", _SH_DENYNO);
+	if (!manifest)
+		return;
+
+	string name = JsonString(dump_name);
+	string path = JsonString(asset_path.c_str());
+	fprintf(
+		manifest,
+		"{\"dump_name\":\"%s\",\"resource_hash\":\"%08x\","
+		"\"original_hash\":\"%08x\",\"asset_path\":\"%s\","
+		"\"width\":%u,\"height\":%u,\"mips\":%u,\"format\":%u}\n",
+		name.c_str(),
+		hash,
+		original_hash,
+		path.c_str(),
+		desc.Width,
+		desc.Height,
+		desc.MipLevels,
+		desc.Format);
+	fclose(manifest);
+}
+
 void FrameAnalysisContext::DumpResource(ID3D11Resource *resource, wchar_t *filename,
 		FrameAnalysisOptions buf_type_mask, int idx, DXGI_FORMAT format,
 		UINT stride, UINT offset)
@@ -1889,6 +1971,10 @@ void FrameAnalysisContext::DumpResource(ID3D11Resource *resource, wchar_t *filen
 			FALogInfo(L"Skipped dumping Texture1D: %ls\n", filename);
 			break;
 		case D3D11_RESOURCE_DIMENSION_TEXTURE2D:
+			if (analyse_options & FrameAnalysisOptions::ASSET_PATH)
+				DumpTextureAssetPathManifest(
+					(ID3D11Texture2D*)resource,
+					filename);
 			if (analyse_options & FrameAnalysisOptions::FMT_2D_MASK) {
 				if (analyse_options & FrameAnalysisOptions::MONO)
 					Dump2DResource((ID3D11Texture2D*)resource, filename, NULL, format);
@@ -2276,13 +2362,12 @@ static bool create_shortcut(const wchar_t *filename, const wchar_t *dedupe_filen
 {
 	IShellLink *psl;
 	IPersistFile *ppf;
-	HRESULT hr, dont_care;
 	wchar_t lnk_path[MAX_PATH];
 
-	dont_care = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+	EnsureCOM();
 
 	// https://msdn.microsoft.com/en-us/library/aa969393.aspx#Shellink_Creating_Shortcut
-	hr = CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLink, (LPVOID*)&psl);
+	HRESULT hr = CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLink, (LPVOID*)&psl);
 	if (SUCCEEDED(hr)) {
 		psl->SetPath(dedupe_filename);
 		hr = psl->QueryInterface(IID_IPersistFile, (LPVOID*)&ppf);
@@ -2293,8 +2378,6 @@ static bool create_shortcut(const wchar_t *filename, const wchar_t *dedupe_filen
 		}
 		psl->Release();
 	}
-
-	CoUninitialize();
 
 	return SUCCEEDED(hr);
 }
@@ -2473,21 +2556,19 @@ void FrameAnalysisContext::DumpMesh(DrawCallInfo *call_info)
 		staged_ib->Release();
 }
 
-static bool vb_slot_in_layout(int slot, ID3DBlob *layout)
+static bool vb_slot_in_layout(int slot, const HackerInputLayout* layout)
 {
-	D3D11_INPUT_ELEMENT_DESC *layout_desc = NULL;
-	size_t layout_elements;
-	UINT i;
-
 	if (!layout)
 		return true;
 
-	layout_desc = (D3D11_INPUT_ELEMENT_DESC*)layout->GetBufferPointer();
-	layout_elements = layout->GetBufferSize() / sizeof(D3D11_INPUT_ELEMENT_DESC);
+	const D3D11_INPUT_ELEMENT_DESC* elements = layout->GetElements();
+	UINT count = layout->GetElementCount();
 
-	for (i = 0; i < layout_elements; i++)
-		if (layout_desc[i].InputSlot == slot)
+	for (UINT i = 0; i < count; ++i)
+	{
+		if (elements[i].InputSlot == slot)
 			return true;
+	}
 
 	return false;
 }
@@ -2501,8 +2582,7 @@ void FrameAnalysisContext::DumpVBs(DrawCallInfo *call_info, ID3D11Buffer *staged
 	wchar_t filename[MAX_PATH];
 	HRESULT hr;
 	UINT i, first = 0, count = 0;
-	ID3D11InputLayout *layout = NULL;
-	ID3DBlob *layout_desc = NULL;
+	HackerInputLayout* layout = nullptr;
 
 	if (call_info) {
 		first = call_info->FirstVertex;
@@ -2511,25 +2591,19 @@ void FrameAnalysisContext::DumpVBs(DrawCallInfo *call_info, ID3D11Buffer *staged
 
 	// The format of each vertex buffer cannot be obtained from this call.
 	// Rather, it is available in the input layout assigned to the
-	// pipeline, and there is no API to get the layout description, so we
-	// store it in a blob attached to the layout when it was created that
-	// we retrieve here.
+	// pipeline, and there is no API to get the layout description, so
+	// HackerInputLayout caches the original descriptors when the layout is created.
+	IAGetInputLayout(reinterpret_cast<ID3D11InputLayout**>(&layout));
 
 	GetPassThroughOrigContext1()->IAGetVertexBuffers(0, D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT, buffers, strides, offsets);
-	GetPassThroughOrigContext1()->IAGetInputLayout(&layout);
 	GetPassThroughOrigContext1()->IAGetPrimitiveTopology(&topology);
-	if (layout) {
-		UINT size = sizeof(ID3DBlob*);
-		layout->GetPrivateData(InputLayoutDescGuid, &size, &layout_desc);
-		layout->Release();
-	}
 
 	for (i = 0; i < D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT; i++) {
 		if (!buffers[i])
 			continue;
 
 		// Skip this vertex buffer if it is not used in the IA layout:
-		if (!vb_slot_in_layout(i, layout_desc))
+		if (!vb_slot_in_layout(i, layout))
 			goto continue_release;
 
 		uint32_t region_hash = 0;
@@ -2544,7 +2618,7 @@ void FrameAnalysisContext::DumpVBs(DrawCallInfo *call_info, ID3D11Buffer *staged
 			DumpBuffer(buffers[i], filename,
 				FrameAnalysisOptions::DUMP_VB, i,
 				ib_fmt, strides[i], offsets[i],
-				first, count, layout_desc, topology,
+				first, count, layout, topology,
 				call_info, NULL, staged_ib, ib_off);
 		}
 
@@ -2552,11 +2626,8 @@ continue_release:
 		buffers[i]->Release();
 	}
 
-	// Although the documentation fails to mention it, GetPrivateData()
-	// does bump the refcount if SetPrivateDataInterface() was used, so we
-	// need to balance it here:
-	if (layout_desc)
-		layout_desc->Release();
+	if (layout)
+		layout->Release();
 }
 
 void FrameAnalysisContext::DumpIB(DrawCallInfo *call_info, ID3D11Buffer **staged_ib, DXGI_FORMAT *format, UINT *offset)

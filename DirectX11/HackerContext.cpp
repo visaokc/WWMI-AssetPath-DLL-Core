@@ -24,6 +24,7 @@
 #include "ShaderRegex.h"
 #include "FrameAnalysis.h"
 #include "profiling.h"
+#include "AssetPathTextureIdentity.h"
 
 // -----------------------------------------------------------------------------------------------
 
@@ -89,6 +90,9 @@ HackerContext::HackerContext(ID3D11Device1 *pDevice1, ID3D11DeviceContext1 *pCon
 	mCurrentDepthTarget = NULL;
 	mCurrentPSUAVStartSlot = 0;
 	mCurrentPSNumUAVs = 0;
+	mCurrentInputLayout = nullptr;
+	mOriginalInputLayout = nullptr;
+	mOverrideInputLayout = nullptr;
 }
 
 
@@ -753,6 +757,40 @@ void HackerContext::DeferredShaderReplacementBeforeDispatch()
 		(mCurrentComputeShaderHandle, mCurrentComputeShader, L"cs");
 }
 
+void HackerContext::DeferInputLayoutOverride(HackerInputLayout* pInputLayout)
+{
+	LogDebug("HackerContext::DeferInputLayoutOverride(%s@%p) called pInputLayout=%p\n", type_name(this), this, pInputLayout);
+
+	if (mOverrideInputLayout != nullptr)
+		mOverrideInputLayout->Release();
+
+	mOverrideInputLayout = pInputLayout;
+}
+
+void HackerContext::OverrideInputLayout()
+{
+	if (mOverrideInputLayout == nullptr || mOverrideInputLayout == mCurrentInputLayout)
+		return;
+
+	LogDebug("HackerContext::OverrideInputLayout(%s@%p) called mOverrideInputLayout=%p\n", type_name(this), this, mOverrideInputLayout);
+
+	if (mOriginalInputLayout == nullptr)
+		mOriginalInputLayout = mCurrentInputLayout;
+
+	IASetInputLayout(mOverrideInputLayout);
+}
+
+void HackerContext::RestoreInputLayout()
+{
+	LogDebug("HackerContext::RestoreInputLayout(%s@%p) called mOriginalInputLayout=%p\n", type_name(this), this, mOriginalInputLayout);
+
+	mOverrideInputLayout->Release();
+
+	IASetInputLayout(mOriginalInputLayout);
+
+	mOverrideInputLayout = nullptr;
+	mOriginalInputLayout = nullptr;
+}
 
 void HackerContext::BeforeDraw(DrawContext &data)
 {
@@ -961,6 +999,8 @@ void HackerContext::BeforeDraw(DrawContext &data)
 			data.post_commands[4] = &i->second.post_command_list;
 			ProcessShaderOverride(&i->second, true, &data);
 		}
+
+		OverrideInputLayout();
 	}
 
 out_profile:
@@ -998,6 +1038,11 @@ void HackerContext::AfterDraw(DrawContext &data)
 		data.oldPixelShader->Release();
 		if (ret)
 			ret->Release();
+	}
+
+	if (mOriginalInputLayout != nullptr) {
+		RestoreInputLayout();
+		mOriginalInputLayout = nullptr;
 	}
 
 	if (Profiling::mode == Profiling::Mode::SUMMARY)
@@ -1227,7 +1272,7 @@ bool HackerContext::MapTrackRegionHashes(ID3D11Resource* pResource, D3D11_MAP Ma
 	ID3D11Buffer* buf = (ID3D11Buffer*)pResource;
 	D3D11_BUFFER_DESC buf_desc;
 	buf->GetDesc(&buf_desc);
-	if (buf_desc.BindFlags & (D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_INDEX_BUFFER)) {
+	if (buf_desc.BindFlags & (D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_INDEX_BUFFER | D3D11_BIND_CONSTANT_BUFFER)) {
 		return true;
 	}
 	return false;
@@ -1354,7 +1399,7 @@ out_profile:
 		Profiling::end(&profiling_state, &Profiling::map_overhead);
 }
 
-void UpdateResourceDataCacheFromMap(ID3D11Resource* pResource, const void* data, size_t size, bool* deallocate_diverted_memory)
+void UpdateResourceDataCacheFromMap(ID3D11Resource* pResource, void* data, size_t size, bool* deallocate_diverted_memory)
 {
 	if (!data || !size)
 		return;
@@ -1368,7 +1413,8 @@ void UpdateResourceDataCacheFromMap(ID3D11Resource* pResource, const void* data,
 		return;
 	}
 
-	info->WriteDataCache(data, size);
+	//LogInfo("UpdateResourceDataCacheFromMap size=%d, pResource=%p\n", size, pResource);
+	info->SetDataCache(data, size);
 
 	if (deallocate_diverted_memory)
 		*deallocate_diverted_memory = false;
@@ -1397,7 +1443,7 @@ void HackerContext::TrackAndDivertUnmap(ID3D11Resource *pResource, UINT Subresou
 
 	bool deallocate_diverted_memory = true;
 
-	if (G->track_region_hashes && map_info->bind_flags & (D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_INDEX_BUFFER))
+	if (G->track_region_hashes && map_info->bind_flags & (D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_INDEX_BUFFER | D3D11_BIND_CONSTANT_BUFFER))
 		UpdateResourceDataCacheFromMap(pResource, map_info->map.pData, map_info->size, &deallocate_diverted_memory);
 
 	if (G->track_texture_updates == 1 && Subresource == 0 && map_info->mapped_writable)
@@ -1466,7 +1512,17 @@ STDMETHODIMP_(void) HackerContext::IASetInputLayout(THIS_
 	/* [annotation] */
 	__in_opt ID3D11InputLayout *pInputLayout)
 {
-	 mOrigContext1->IASetInputLayout(pInputLayout);
+	LogDebug("HackerContext::IASetInputLayout(%s@%p) called pInputLayout=%p\n", type_name(this), this, pInputLayout);
+
+	if (mCurrentInputLayout)
+		mCurrentInputLayout->Release();
+
+	mCurrentInputLayout = pInputLayout ? static_cast<HackerInputLayout*>(pInputLayout) : nullptr;
+
+	if (mCurrentInputLayout)
+		mCurrentInputLayout->AddRef();
+
+	mOrigContext1->IASetInputLayout(mCurrentInputLayout ? mCurrentInputLayout->GetOrigInputLayout() : nullptr);
 }
 
 STDMETHODIMP_(void) HackerContext::IASetVertexBuffers(THIS_
@@ -1855,7 +1911,7 @@ void CopySubresourceRegionCache(ID3D11Resource* pSrcResource, ID3D11Resource* pD
 		dst_info->InitializeDataCache(dst_desc.ByteWidth);
 	}
 
-	dst_info->WriteDataCacheRegion(src_info->cached_data + src_offset, region_size, DstX);
+	dst_info->SetDataCacheRegion(src_info->GetCachedData() + src_offset, region_size, DstX);
 
 	//dst_info->cached_data_hash = crc32c_hw(0, dst_info->cached_data, dst_desc.ByteWidth);
 
@@ -2432,7 +2488,13 @@ STDMETHODIMP_(void) HackerContext::IAGetInputLayout(THIS_
 	/* [annotation] */
 	__out  ID3D11InputLayout **ppInputLayout)
 {
-	 mOrigContext1->IAGetInputLayout(ppInputLayout);
+	if (!ppInputLayout)
+		return;
+
+	*ppInputLayout = mCurrentInputLayout;
+
+	if (mCurrentInputLayout)
+		mCurrentInputLayout->AddRef();
 }
 
 STDMETHODIMP_(void) HackerContext::IAGetVertexBuffers(THIS_
@@ -2932,11 +2994,11 @@ void HackerContext::InitIniParams()
 // This function makes sure that the StereoParams and IniParams resources
 // remain pinned whenever the game assigns shader resources:
 template <void (__stdcall ID3D11DeviceContext::*OrigSetShaderResources)(THIS_
-		UINT StartSlot,
-		UINT NumViews,
-		ID3D11ShaderResourceView *const *ppShaderResourceViews)>
+			UINT StartSlot,
+			UINT NumViews,
+			ID3D11ShaderResourceView *const *ppShaderResourceViews)>
 void HackerContext::SetShaderResources(UINT StartSlot, UINT NumViews,
-		ID3D11ShaderResourceView *const *ppShaderResourceViews)
+			ID3D11ShaderResourceView *const *ppShaderResourceViews)
 {
 	ID3D11ShaderResourceView **override_srvs = NULL;
 
