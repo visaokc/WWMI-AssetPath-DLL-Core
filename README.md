@@ -50,7 +50,10 @@ The ZIP contains `d3d11.dll` and `d3dx.ini`.
 3. Back up the existing `d3d11.dll` and `d3dx.ini`.
 4. Extract both files from the release ZIP into the WWMI root directory and
    replace the existing files.
-5. Start the game through XXMI Launcher.
+5. Open XXMI Launcher, go to `Settings` > `Advanced`, and enable
+   `Unsafe Mode`. This is required for the Launcher to start the game with
+   the custom replacement DLL.
+6. Start the game through XXMI Launcher.
 
 ## Runtime usage
 
@@ -116,7 +119,9 @@ Asset Hash Capture: ON (AGGRESSIVE)
 3. 备份原来的 `d3d11.dll` 和 `d3dx.ini`。
 4. 从 [Releases](https://github.com/visaokc/WWMI-AssetPath-DLL-Core/releases/latest)
    下载 ZIP，将其中两个文件解压到 WWMI 根目录并覆盖。
-5. 通过 XXMI Launcher 启动游戏。
+5. 打开 XXMI Launcher，进入`设置` > `高级`，启用`不安全模式`。这是让
+   Launcher 使用自定义替换 DLL 启动游戏的必要条件。
+6. 通过 XXMI Launcher 启动游戏。
 
 ### 快捷键
 
