@@ -1,5 +1,26 @@
 # DEV_LOG
 
+## 2026-08-15 - v1.0.1 release
+
+- Purpose: publish the complete authoring/debug update accumulated since the
+  original v1.0.0 stable Asset Path package.
+- Release scope: Mip-aware F7/Shift+F7 replacement, Ctrl+F7 diagnostic Path
+  conversion with in-stream residuals, Alt+F7 validated Path cleanup, runtime
+  `path`/`name` aliases and identity priority, readable Path section names,
+  compiler marker `Ver1.1`, and Hunting-gated F11/agent Draw Debug control.
+- Documentation: `README.md` now identifies v1.0.1 as the current release and
+  includes English and Chinese update briefs plus release checksums.
+- Package: `_archive/zip-packages/WWMI-AssetPath-DLL-v1.0.1.zip` contains only
+  `d3d11.dll` and the release-template `d3dx.ini` at the ZIP root. SHA256:
+  `7637FAF78B8978B9AC3A49B0163FB7FCED60F7872733FDE39C1BFADD49A37496`.
+  DLL SHA256:
+  `9A206DB7BCB4FCD2E43F5905821CBE754DFB6D3AEB2B652BA53A0DDFB4EEB595`.
+  INI SHA256:
+  `14C5F24A4D9A0963002C33EC405CD78D5A16047F7AD7DE2643A80457B66E4E1F`.
+- Verification: native Asset Hash document tests and the Draw Debug Hunting
+  gate test passed; the final `Release|x64` build completed with zero errors.
+  The previously installed live DLL already matches the packaged DLL.
+
 ## 2026-08-15 - Unique readable Path section names
 
 - Purpose: fix pure-Path texture scrambling caused by Ctrl+F7/Alt+F7 reducing

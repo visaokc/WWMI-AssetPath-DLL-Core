@@ -19,21 +19,35 @@ automation.
 The root commit contains only the upstream files needed by the `DirectX11`
 project and its direct build dependencies.
 
-## Stable Asset Path build
+## Current release: v1.0.1
 
-The second commit adds the currently validated WWMI Asset Path implementation:
+v1.0.1 expands the original stable Asset Path build with authoring and debug
+workflows for game-version updates:
 
-- always-on Asset Path identity capture
-- streaming texture hash collection
-- F7 backup-copy INI migration mode
-- Shift+F7 aggressive in-place INI migration mode
-- legacy hash-to-Asset-Path migration
-- bounded observation history and ambiguity-safe hash emission
+- Mip-aware F7 and Shift+F7 Hash refresh with session-scoped replacement,
+  multiplicity markers, and incomplete-capture preservation
+- Ctrl+F7 diagnostic conversion from valid Hashes to one active Path while
+  retaining unmatched Hash/Mip candidates in the same generated stream
+- Alt+F7 validated Path cleanup that removes all stored Hashes after the exact
+  Path is observed alive
+- runtime `path` and `name` aliases, canonical full-field output, and identity
+  priority `Path -> Name -> Hash/fuzzy`
+- readable generated Path section names such as
+  `[TextureOverride_T_Example_D]`, stable across Path -> Hash -> Path updates
+- Asset Hash compiler marker `Ver1.1`
+- Hunting-gated F11 Draw Debug capture and a bounded local agent-control stream
 
-Validated stable `d3d11.dll` SHA256:
+Release checksums:
 
 ```text
-ED8E4AF3FEB95914E6F90DD80B49BEA3166660670A6149620F180536E6C9E0B7
+d3d11.dll
+9A206DB7BCB4FCD2E43F5905821CBE754DFB6D3AEB2B652BA53A0DDFB4EEB595
+
+d3dx.ini
+14C5F24A4D9A0963002C33EC405CD78D5A16047F7AD7DE2643A80457B66E4E1F
+
+WWMI-AssetPath-DLL-v1.0.1.zip
+7637FAF78B8978B9AC3A49B0163FB7FCED60F7872733FDE39C1BFADD49A37496
 ```
 
 ## Download
@@ -281,6 +295,20 @@ Hash-to-Path resolution before conversion.
   instead of risking an unrelated texture replacement.
 
 ## 中文使用说明
+
+### v1.0.1 更新简报
+
+- F7 / Shift+F7 现在按 Mip 尺寸与 multiplicity 标记更新 Hash；未收齐的多 Hash Mip
+  继续增量保留，收齐后再整组替换。
+- Ctrl+F7 可将当前有效 Hash 归一化为 active Path，未匹配 Hash 与 Mip 标记仍留在
+  同一 `asset-hash-stream` 内供版本更新排错与后续自动修复。
+- Alt+F7 在确认精确 Path 存活后清理整个生成块的新旧 Hash，只保留 Path 写法。
+- TextureOverride 新增运行时 `path` / `name` 简写，任意 F7 写入后自动规范化为完整字段；
+  身份优先级为 Path -> Name -> Hash/fuzzy。
+- 生成的 Path section 使用简短可读的 object name，例如 `[TextureOverride_T_Example_D]`，
+  并在 Path -> Hash -> Path 往返中保持稳定。
+- `asset_hash_compiler_version` 升级为 `Ver1.1`；F11 Draw Debug 与 agent 控制现在必须先开启
+  Hunting 模式，避免普通游戏过程误触 dump。
 
 ### 安装
 
