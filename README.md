@@ -19,29 +19,33 @@ automation.
 The root commit contains only the upstream files needed by the `DirectX11`
 project and its direct build dependencies.
 
-## Current release: v1.0.2
+## Current release: v1.0.3
 
-v1.0.2 fixes generated section naming and release compatibility:
+v1.0.3 fixes the release package and stabilizes Draw Debug:
 
 - **Consistent section names:** Path mode always writes
   `[TextureOverride_<name>]`; Hash mode always writes
   `[TextureOverride_Texture_<hash>]`, regardless of the author's original name.
 - **Restored Hash priority:** generated Hash sections automatically receive
   `match_priority = 0` when no priority was explicitly provided.
-- **UTF-8 release INI:** fixes the Launcher decode error caused by one invalid
-  Windows-1252 byte in the previous GitHub package.
+- **Correct WWMI configuration:** the packaged INI is the verified live WWMI
+  configuration, including the correct game target, WWMI Core include, Mods
+  include, F7 bindings, and strict UTF-8 encoding.
+- **Stable Draw Debug:** Draw Debug is enabled by default, but creates no
+  background threads while the game starts. Its pipe and writer threads now
+  exist only while Hunting or capture actually needs them and shut down cleanly.
 
 Release checksums:
 
 ```text
 d3d11.dll
-2F782BE0823495428746F1F6203EC5C23A0FCA4CFA2156F94C3E13408D7FF56B
+8F46A23E834A25E5170B9141EBBC2994FA5C6D8F25C66274DCFEA8D4A3DFBC03
 
 d3dx.ini
-ABB1B523F65507D59F6DDFA17AD732BEFF15D4492E8E10DFD5A2846EF4338E0C
+1E14D07F4ECDA067DA018793BD3CC40725D4E45064533BDE9710937ED31AB547
 
-WWMI-AssetPath-DLL-v1.0.2.zip
-6B283E53EFB887180775E996CE1955270E884F990D7247BB259B2789A131DF25
+WWMI-AssetPath-DLL-v1.0.3.zip
+4DAE4D02AB22165C19A7CDDEC805003B25301C6C569F323009E888E5219CD545
 ```
 
 ## Download
@@ -113,11 +117,13 @@ preserved.
 
 ## Draw Debug
 
-Draw Debug is an opt-in, bounded FrameAnalysis profile for investigating all
+Draw Debug is a bounded FrameAnalysis profile for investigating all
 draws involved in a modded character, including otherwise separate effect,
-parallax, shadow, depth, and motion-vector passes.
+parallax, shadow, depth, and motion-vector passes. It is enabled by default in
+the supplied INI but remains inactive until Hunting and F11/agent control
+actually request capture.
 
-Enable it in `d3dx.ini` before starting the game:
+Default configuration:
 
 ```ini
 [DrawDebug]
@@ -150,15 +156,16 @@ entries identify known mod draws in the log, while shared shaders, buffers,
 resources, passes, and transforms allow related effect and parallax draws to be
 correlated offline without excluding them prematurely.
 
-When `enabled = false`, no FrameAnalysisContext is requested by Draw Debug and
-there is no Draw Debug runtime cost. With `enabled = true` but no capture active,
-the context remains ready in soft-disabled hunting mode; this has a small fixed
-wrapper cost, while the intentional GPU readback and disk-write cost is limited
-to captured frames.
+When `enabled = false`, no FrameAnalysisContext is requested by Draw Debug.
+With `enabled = true`, INI parsing only records the configuration: it does not
+create the pipe or writer threads during game startup. The pipe exists only
+while Hunting is active, and the writer and output file exist only during a
+lightweight capture. GPU readback and disk-write cost remain limited to actual
+captures.
 
 ### Agent control and targeted capture
 
-When Draw Debug is enabled, the local-only named pipe
+While Draw Debug and Hunting are enabled, the local-only named pipe
 `\\.\pipe\wwmi-draw-debug` accepts `PING`, `STATUS`, `START`, `STOP`,
 `SNAPSHOT`, `MARK <label>`, `FILTER CLEAR`, `FILTER DRAW <count> <first>`, and
 `ARM`. Pipe commands only queue state changes; D3D11 work remains on the render
@@ -289,14 +296,16 @@ Hash-to-Path resolution before conversion.
 
 ## 中文使用说明
 
-### v1.0.2 更新简报
+### v1.0.3 更新简报
 
 - **统一 section 名：**Path 模式固定写成 `[TextureOverride_<name>]`，Hash 模式固定写成
   `[TextureOverride_Texture_<hash>]`，不再继承作者原本的自定义命名。
 - **补回 Hash 优先级：**生成 Hash section 时，如果原本没有 priority，会自动补上
   `match_priority = 0`。
-- **修复 GitHub 包编码：**发布用 `d3dx.ini` 已改为 UTF-8 no BOM，解决部分用户安装后
-  Launcher 报 `utf-8 codec can't decode byte 0x92` 的问题。
+- **修复发布包：**包内 `d3dx.ini` 直接采用已经实测可用的本地 WWMI 配置，修复编码错误、
+  目标程序错误和缺少 WWMI Core include 导致 Mod 无法加载的问题。
+- **稳定 Draw Debug：**功能默认开启，但游戏启动时不再创建后台线程；只在进入 Hunting
+  或实际捕获时按需启动，并在结束后正确关闭，避免游戏初期偶发闪退。
 
 ### 安装
 

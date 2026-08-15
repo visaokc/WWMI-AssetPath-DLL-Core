@@ -1,5 +1,59 @@
 # DEV_LOG
 
+## 2026-08-15 - v1.0.3 Draw Debug lifecycle and corrected WWMI package
+
+- Purpose: keep the custom F11/agent Draw Debug feature available without
+  creating background threads while the game is loading. The previous
+  `enabled = true` path created both writer and named-pipe threads directly
+  from INI parsing and never provided a complete thread/file shutdown path.
+- Lifecycle behavior: parsing `[DrawDebug]` now records configuration only.
+  Entering Hunting starts the cancellable overlapped named-pipe server; leaving
+  Hunting stops and joins it. Lightweight capture creates its writer thread and
+  output file only when capture actually starts, then drains the queue, joins
+  the writer, flushes, and closes the file when capture stops.
+- Safety behavior: named-pipe connect/read/write operations wait on a dedicated
+  stop event and use `CancelIoEx`, preventing shutdown from hanging on a blocked
+  pipe client. Output-path access is synchronized with the existing queue lock.
+- Verification: the lifecycle contract test first failed against eager startup,
+  then passed after the fix. Asset Hash document tests and release INI contract
+  also pass. Full `Release|x64` rebuild completed with 212 pre-existing warnings
+  and zero errors; DLL SHA256:
+  `8F46A23E834A25E5170B9141EBBC2994FA5C6D8F25C66274DCFEA8D4A3DFBC03`.
+- Live A/B: with the game closed, the rebuilt DLL was installed and live
+  `[DrawDebug] enabled = true` restored. The previous live DLL/INI are backed up
+  at `D:\WWMI\Backups\DrawDebugLazyLifecycle-20260815-082739`. Repeated game
+  startup/exit plus Hunting and F11 lifecycle testing passed without the prior
+  startup crash, so the verified live INI is packaged byte-for-byte with Draw
+  Debug enabled by default.
+- Release package: `_archive/zip-packages/WWMI-AssetPath-DLL-v1.0.3.zip`
+  contains only the live-tested DLL and INI. Extracted artifacts match their
+  source hashes and pass the complete release contract. ZIP SHA256:
+  `4DAE4D02AB22165C19A7CDDEC805003B25301C6C569F323009E888E5219CD545`.
+
+## 2026-08-15 - v1.0.2 release INI root-cause correction (local only)
+
+- Confirmed root cause: the published v1.0.2 ZIP used the repository's generic
+  XXMI `d3dx.ini` instead of the user's working WWMI configuration. It targeted
+  `Game.exe` and omitted `include = Core\WWMI\WuWa-Model-Importer.ini`, so the
+  game could start while WWMI Core and all Mods remained unloaded. Replacing
+  only the INI with `D:\WWMI\d3dx.ini` restored Mod loading with the same DLL.
+- Release-source rule: future packages must derive `d3dx.ini` from the user's
+  known-working live `D:\WWMI\d3dx.ini`, not from a generic XXMI template.
+- Regression boundary: `tests/check_release_ini_utf8.ps1` now validates the
+  complete release contract: strict UTF-8 without BOM, the exact WWMI target,
+  WWMI Core include, Mods include, all four F7 bindings, and default-enabled
+  lazy-lifecycle Draw
+  Debug. The published v1.0.2 INI fails this new test at the WWMI target check;
+  the corrected INI passes it. A package that fails any item must not be
+  released.
+- Local validation package:
+  `_archive/zip-packages/WWMI-AssetPath-DLL-v1.0.2-ini-fix-local-test.zip`
+  contains only `d3d11.dll` and the corrected `d3dx.ini`. Extracted files pass
+  the release contract and match their source hashes. ZIP SHA256:
+  `F52D364146C49A44FBA5AFA104BF58961BF28FBA8900664691D78B202359AB51`.
+- Remote boundary: this correction remains local. Do not push, tag, or modify a
+  GitHub Release without explicit user permission in the current turn.
+
 ## 2026-08-15 - v1.0.2 canonical naming and UTF-8 release fix
 
 - Purpose: make every generated TextureOverride name independent of an

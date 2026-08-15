@@ -1,4 +1,5 @@
 #include "DrawDebugStream.h"
+#include "log.h"
 
 #include <Windows.h>
 #include <Strsafe.h>
@@ -17,6 +18,8 @@ namespace {
 CRITICAL_SECTION queue_lock;
 INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
 HANDLE wake_event = NULL;
+HANDLE writer_stop_event = NULL;
+HANDLE pipe_stop_event = NULL;
 HANDLE writer_thread = NULL;
 HANDLE pipe_thread = NULL;
 HANDLE output_file = INVALID_HANDLE_VALUE;
@@ -100,29 +103,37 @@ void Enqueue(std::string &&line)
 DWORD WINAPI WriterThreadProc(void *)
 {
 	std::deque<std::string> pending;
+	HANDLE waits[] = { writer_stop_event, wake_event };
 	for (;;) {
-		WaitForSingleObject(wake_event, 250);
+		DWORD wait_result = WaitForMultipleObjects(_countof(waits), waits, FALSE, INFINITE);
 		EnterCriticalSection(&queue_lock);
 		pending.swap(queue);
 		LeaveCriticalSection(&queue_lock);
 
-		if (output_file == INVALID_HANDLE_VALUE || pending.empty())
-			continue;
-		for (const std::string &line : pending) {
-			DWORD bytes_written = 0;
-			WriteFile(output_file, line.data(), (DWORD)line.size(), &bytes_written, NULL);
-			written.fetch_add(1, std::memory_order_relaxed);
+		if (output_file != INVALID_HANDLE_VALUE) {
+			for (const std::string &line : pending) {
+				DWORD bytes_written = 0;
+				WriteFile(output_file, line.data(), (DWORD)line.size(), &bytes_written, NULL);
+				written.fetch_add(1, std::memory_order_relaxed);
+			}
+			if (!pending.empty())
+				FlushFileBuffers(output_file);
 		}
-		FlushFileBuffers(output_file);
 		pending.clear();
+		if (wait_result == WAIT_OBJECT_0)
+			break;
 	}
+	return 0;
 }
 
 std::string StatusJson()
 {
 	char buf[1024];
 	char path_utf8[MAX_PATH * 3] = {};
-	WideCharToMultiByte(CP_UTF8, 0, output_path.c_str(), -1,
+	EnterCriticalSection(&queue_lock);
+	std::wstring path = output_path;
+	LeaveCriticalSection(&queue_lock);
+	WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1,
 		path_utf8, sizeof(path_utf8), NULL, NULL);
 	for (char *p = path_utf8; *p; ++p) {
 		if (*p == '\\')
@@ -139,17 +150,46 @@ std::string StatusJson()
 	return std::string(buf);
 }
 
+bool CompletePipeOperation(HANDLE pipe, OVERLAPPED *overlapped, BOOL completed,
+	DWORD *bytes_transferred)
+{
+	DWORD ignored = 0;
+	if (!bytes_transferred)
+		bytes_transferred = &ignored;
+	if (completed)
+		return true;
+	if (GetLastError() != ERROR_IO_PENDING)
+		return false;
+	HANDLE waits[] = { pipe_stop_event, overlapped->hEvent };
+	if (WaitForMultipleObjects(_countof(waits), waits, FALSE, INFINITE) != WAIT_OBJECT_0 + 1) {
+		CancelIoEx(pipe, overlapped);
+		WaitForSingleObject(overlapped->hEvent, INFINITE);
+		return false;
+	}
+	return !!GetOverlappedResult(pipe, overlapped, bytes_transferred, FALSE);
+}
+
 DWORD WINAPI PipeThreadProc(void *)
 {
 	const wchar_t *pipe_name = L"\\\\.\\pipe\\wwmi-draw-debug";
-	for (;;) {
+	while (WaitForSingleObject(pipe_stop_event, 0) != WAIT_OBJECT_0) {
 		HANDLE pipe = CreateNamedPipeW(pipe_name,
-			PIPE_ACCESS_DUPLEX,
+			PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
 			PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
 			1, 4096, 4096, 0, NULL);
 		if (pipe == INVALID_HANDLE_VALUE)
 			return 1;
-		if (!ConnectNamedPipe(pipe, NULL) && GetLastError() != ERROR_PIPE_CONNECTED) {
+		OVERLAPPED operation = {};
+		operation.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+		if (!operation.hEvent) {
+			CloseHandle(pipe);
+			return 1;
+		}
+		BOOL connected = ConnectNamedPipe(pipe, &operation);
+		if (!connected && GetLastError() == ERROR_PIPE_CONNECTED) {
+			connected = TRUE;
+		} else if (!CompletePipeOperation(pipe, &operation, connected, NULL)) {
+			CloseHandle(operation.hEvent);
 			CloseHandle(pipe);
 			continue;
 		}
@@ -157,7 +197,10 @@ DWORD WINAPI PipeThreadProc(void *)
 		char command[4096] = {};
 		DWORD read = 0;
 		std::string response;
-		if (ReadFile(pipe, command, sizeof(command) - 1, &read, NULL)) {
+		ResetEvent(operation.hEvent);
+		BOOL read_completed = ReadFile(pipe, command, sizeof(command) - 1,
+			&read, &operation);
+		if (CompletePipeOperation(pipe, &operation, read_completed, &read)) {
 			command[read] = 0;
 			while (read && (command[read - 1] == '\r' || command[read - 1] == '\n'))
 				command[--read] = 0;
@@ -219,25 +262,51 @@ DWORD WINAPI PipeThreadProc(void *)
 			}
 		}
 		DWORD sent = 0;
-		WriteFile(pipe, response.data(), (DWORD)response.size(), &sent, NULL);
-		FlushFileBuffers(pipe);
+		ResetEvent(operation.hEvent);
+		BOOL write_completed = WriteFile(pipe, response.data(),
+			(DWORD)response.size(), &sent, &operation);
+		CompletePipeOperation(pipe, &operation, write_completed, &sent);
 		DisconnectNamedPipe(pipe);
+		CloseHandle(operation.hEvent);
 		CloseHandle(pipe);
 	}
+	return 0;
 }
 
 BOOL CALLBACK InitState(PINIT_ONCE, PVOID, PVOID *)
 {
 	InitializeCriticalSection(&queue_lock);
 	wake_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-	writer_thread = CreateThread(NULL, 0, WriterThreadProc, NULL, 0, NULL);
-	pipe_thread = CreateThread(NULL, 0, PipeThreadProc, NULL, 0, NULL);
-	return TRUE;
+	writer_stop_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+	pipe_stop_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+	return wake_event && writer_stop_event && pipe_stop_event;
 }
 
-void EnsureInitialized()
+bool EnsureInitialized()
 {
-	InitOnceExecuteOnce(&init_once, InitState, NULL, NULL);
+	return !!InitOnceExecuteOnce(&init_once, InitState, NULL, NULL);
+}
+
+void StartDrawDebugControlServer()
+{
+	if (pipe_thread || !EnsureInitialized())
+		return;
+	ResetEvent(pipe_stop_event);
+	pipe_thread = CreateThread(NULL, 0, PipeThreadProc, NULL, 0, NULL);
+}
+
+void StopDrawDebugControlServer()
+{
+	if (!pipe_thread)
+		return;
+	SetEvent(pipe_stop_event);
+	DWORD wait_result = WaitForSingleObject(pipe_thread, 5000);
+	if (wait_result == WAIT_TIMEOUT) {
+		LogInfo("Draw Debug pipe thread did not stop within five seconds\n");
+		return;
+	}
+	CloseHandle(pipe_thread);
+	pipe_thread = NULL;
 }
 
 } // namespace
@@ -245,28 +314,35 @@ void EnsureInitialized()
 void ConfigureDrawDebugStream(bool enabled, unsigned max_records)
 {
 	configured.store(enabled);
+	queue_limit = max_records ? max_records : 65536;
 	if (!enabled) {
-		control_allowed.store(false);
+		SetDrawDebugControlAllowed(false);
+		StopDrawDebugStream();
 		return;
 	}
-	queue_limit = max_records ? max_records : 65536;
-	EnsureInitialized();
 }
 
 void SetDrawDebugControlAllowed(bool allowed)
 {
-	control_allowed.store(allowed, std::memory_order_release);
+	bool effective = configured.load(std::memory_order_acquire) && allowed;
+	bool previous = control_allowed.exchange(effective, std::memory_order_acq_rel);
+	if (effective && !previous)
+		StartDrawDebugControlServer();
+	else if (!effective && previous)
+		StopDrawDebugControlServer();
 }
 
 void StartDrawDebugStream()
 {
-	if (!configured.load() || active.load())
+	if (!configured.load() || active.load() || writer_thread || !EnsureInitialized())
 		return;
-	EnsureInitialized();
 	sequence.store(0);
 	frame.store(0);
 	written.store(0);
 	dropped.store(0);
+	EnterCriticalSection(&queue_lock);
+	queue.clear();
+	LeaveCriticalSection(&queue_lock);
 
 	wchar_t module_path[MAX_PATH];
 	wchar_t directory[MAX_PATH];
@@ -282,17 +358,30 @@ void StartDrawDebugStream()
 		slash[1] = 0;
 	wcscat_s(directory, stamp);
 	CreateDirectoryW(directory, NULL);
-	output_path = directory;
-	output_path += L"\\stream.jsonl";
-	output_file = CreateFileW(output_path.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+	std::wstring path = directory;
+	path += L"\\stream.jsonl";
+	output_file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
 		NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (output_file == INVALID_HANDLE_VALUE)
+		return;
+	EnterCriticalSection(&queue_lock);
+	output_path = path;
+	LeaveCriticalSection(&queue_lock);
+	ResetEvent(writer_stop_event);
 	active.store(true, std::memory_order_release);
+	writer_thread = CreateThread(NULL, 0, WriterThreadProc, NULL, 0, NULL);
+	if (!writer_thread) {
+		active.store(false, std::memory_order_release);
+		CloseHandle(output_file);
+		output_file = INVALID_HANDLE_VALUE;
+		return;
+	}
 	DrawDebugStreamMark("capture_started");
 }
 
 void StopDrawDebugStream()
 {
-	if (!active.exchange(false))
+	if (!active.exchange(false) && !writer_thread)
 		return;
 	char buf[256];
 	sprintf_s(buf,
@@ -303,6 +392,21 @@ void StopDrawDebugStream()
 	queue.emplace_back(buf);
 	LeaveCriticalSection(&queue_lock);
 	SetEvent(wake_event);
+	SetEvent(writer_stop_event);
+	if (writer_thread) {
+		DWORD wait_result = WaitForSingleObject(writer_thread, 5000);
+		if (wait_result == WAIT_TIMEOUT) {
+			LogInfo("Draw Debug writer thread did not stop within five seconds\n");
+			return;
+		}
+		CloseHandle(writer_thread);
+		writer_thread = NULL;
+	}
+	if (output_file != INVALID_HANDLE_VALUE) {
+		FlushFileBuffers(output_file);
+		CloseHandle(output_file);
+		output_file = INVALID_HANDLE_VALUE;
+	}
 }
 
 bool IsDrawDebugStreamActive()
