@@ -70,6 +70,7 @@ static Section RegularSections[] = {
 	{L"Include", true}, // Prefix so that it may be namespaced to allow included files to include more files with relative paths
 	{L"Preset", true},
 	{L"Hunting", false},
+	{L"DrawDebug", false},
 	{L"Logging", false},
 	{L"System", false},
 	{L"Device", false},
@@ -2943,6 +2944,8 @@ wchar_t *TextureOverrideIniKeys[] = {
 	L"hash",
 	L"match_asset_path",
 	L"match_asset_name",
+	L"path",
+	L"name",
 	L"format",
 	L"width",
 	L"height",
@@ -3459,6 +3462,8 @@ static void ParseTextureOverrideSections()
 	bool found;
 	wchar_t asset_path[1024];
 	wchar_t asset_name[1024];
+	wchar_t asset_path_alias[1024];
+	wchar_t asset_name_alias[1024];
 	map<uint32_t, int> max_byte_width_map;
 
 	// Lock entire routine, this can be re-inited.  These shaderoverrides
@@ -3480,57 +3485,78 @@ static void ParseTextureOverrideSections()
 		LogInfo("[%S]\n", id);
 
 		hash = (uint32_t)GetIniHash(id, L"Hash", 0, &found);
-		bool has_asset_path = GetIniStringAndLog(
+		bool has_full_asset_path = GetIniStringAndLog(
 				id,
 				L"match_asset_path",
 				0,
 				asset_path,
 				ARRAYSIZE(asset_path));
-		bool has_asset_name = GetIniStringAndLog(
+		bool has_full_asset_name = GetIniStringAndLog(
 				id,
 				L"match_asset_name",
 				0,
 				asset_name,
 				ARRAYSIZE(asset_name));
-		if (has_asset_path && has_asset_name) {
+		bool has_short_asset_path = GetIniStringAndLog(
+				id,
+				L"path",
+				0,
+				asset_path_alias,
+				ARRAYSIZE(asset_path_alias));
+		bool has_short_asset_name = GetIniStringAndLog(
+				id,
+				L"name",
+				0,
+				asset_name_alias,
+				ARRAYSIZE(asset_name_alias));
+		if ((has_full_asset_path && has_short_asset_path) ||
+				(has_full_asset_name && has_short_asset_name)) {
 			IniWarningW(
-				L"Cannot combine match_asset_path and match_asset_name!\n - [%ls]\n",
+				L"Cannot combine a short asset identity with its full spelling!\n - [%ls]\n",
 				id);
 			continue;
 		}
-		if (has_asset_path || has_asset_name) {
-			if (found || texture_override_section_has_fuzzy_match_keys(id)) {
-				IniWarningW(
-					L"Cannot combine an asset identity match with hash or fuzzy match options!\n - [%ls]\n",
-					id);
-				continue;
-			}
-			if (has_asset_name &&
-					(wcschr(asset_name, L'/') ||
-					 wcschr(asset_name, L'.'))) {
-				IniWarningW(
-					L"match_asset_name must be a bare Unreal object name!\n - [%ls]\n",
-					id);
-				continue;
-			}
-			if (has_asset_path) {
-				G->mTextureOverridePathMap[asset_path].emplace_back();
-				override = &G->mTextureOverridePathMap[asset_path].back();
-				override->asset_path = asset_path;
-			} else {
-				G->mTextureOverrideNameMap[asset_name].emplace_back();
-				override = &G->mTextureOverrideNameMap[asset_name].back();
-				override->asset_name = asset_name;
-			}
+		bool has_asset_path = has_full_asset_path || has_short_asset_path;
+		bool has_asset_name = has_full_asset_name || has_short_asset_name;
+		const wchar_t *resolved_asset_path = has_full_asset_path
+			? asset_path
+			: asset_path_alias;
+		const wchar_t *resolved_asset_name = has_full_asset_name
+			? asset_name
+			: asset_name_alias;
+		if (has_asset_name &&
+				(wcschr(resolved_asset_name, L'/') ||
+				 wcschr(resolved_asset_name, L'.'))) {
+			IniWarningW(
+				L"name/match_asset_name must be a bare Unreal object name!\n - [%ls]\n",
+				id);
+			continue;
+		}
+
+		bool registered_asset_identity = false;
+		if (has_asset_path) {
+			G->mTextureOverridePathMap[resolved_asset_path].emplace_back();
+			override = &G->mTextureOverridePathMap[resolved_asset_path].back();
+			override->asset_path = resolved_asset_path;
 			override->ini_section = id;
 			parse_texture_override_common(id, override, false);
-			continue;
+			registered_asset_identity = true;
+		}
+		if (has_asset_name) {
+			G->mTextureOverrideNameMap[resolved_asset_name].emplace_back();
+			override = &G->mTextureOverrideNameMap[resolved_asset_name].back();
+			override->asset_name = resolved_asset_name;
+			override->ini_section = id;
+			parse_texture_override_common(id, override, false);
+			registered_asset_identity = true;
 		}
 		if (!found) {
 			if (texture_override_section_has_fuzzy_match_keys(id)) {
 				parse_texture_override_fuzzy_match(id);
 				continue;
 			}
+			if (registered_asset_identity)
+				continue;
 
 			IniWarningW(L"Section missing Hash= or valid match options\n - [%ls]\n", id);
 			continue;

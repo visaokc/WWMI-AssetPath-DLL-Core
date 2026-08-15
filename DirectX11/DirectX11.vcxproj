@@ -52,6 +52,7 @@
     <ClCompile Include="cursor.cpp" />
     <ClCompile Include="D3D11Wrapper.cpp" />
     <ClCompile Include="DLLMainHook.cpp" />
+    <ClCompile Include="DrawDebugStream.cpp" />
     <ClCompile Include="FrameAnalysis.cpp" />
     <ClCompile Include="HackerContext.cpp" />
     <ClCompile Include="HackerDevice.cpp" />
@@ -87,6 +88,7 @@
     <ClInclude Include="cursor.h" />
     <ClInclude Include="D3D11Wrapper.h" />
     <ClInclude Include="DLLMainHook.h" />
+    <ClInclude Include="DrawDebugStream.h" />
     <ClInclude Include="FrameAnalysis.h" />
     <ClInclude Include="Globals.h" />
     <ClInclude Include="HackerContext.h" />

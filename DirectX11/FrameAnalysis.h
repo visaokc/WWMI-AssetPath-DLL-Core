@@ -212,6 +212,8 @@ private:
 	void FrameAnalysisAfterUnmap(ID3D11Resource *pResource);
 	void FrameAnalysisAfterUpdate(ID3D11Resource *pResource);
 	void set_default_dump_formats(bool draw);
+	void RecordDrawDebug(const char *call, uint64_t arg0 = 0, uint64_t arg1 = 0,
+		uint64_t arg2 = 0, uint64_t arg3 = 0);
 
 	FrameAnalysisOptions analyse_options;
 	FrameAnalysisOptions oneshot_analyse_options;

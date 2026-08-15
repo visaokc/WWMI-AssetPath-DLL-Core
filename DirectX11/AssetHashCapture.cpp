@@ -22,6 +22,8 @@ enum class CaptureMode
 	Off,
 	Backup,
 	Aggressive,
+	PathConversion,
+	CleanPathConversion,
 };
 
 constexpr size_t kMaxHistoricalIdentities = 8192;
@@ -57,6 +59,18 @@ struct RecentAssetHistory
 std::map<std::wstring, RecentAssetHistory> recent_assets;
 std::map<uintptr_t, std::wstring> active_recent_resources;
 size_t recent_observation_count = 0;
+
+void ResetCaptureSessionLocked()
+{
+	captured_hashes.clear();
+	captured_observation_count = 0;
+	observed_name_paths.clear();
+	ambiguous_names.clear();
+	recent_assets.clear();
+	active_recent_resources.clear();
+	recent_observation_count = 0;
+	capture_dirty = false;
+}
 
 std::wstring Lower(std::wstring value)
 {
@@ -591,19 +605,33 @@ void WriteSnapshot(
 		std::wstring source;
 		if (!ReadUtf8File(source_path, &source))
 			continue;
-		const bool aggressive = mode == CaptureMode::Aggressive;
+		const bool direct_write = mode != CaptureMode::Backup;
 		std::wstring output_path =
-			aggressive ? source_path : source_path + L".hashcache";
-		std::wstring previous = aggressive ? source : std::wstring();
-		if (!aggressive)
+			direct_write ? source_path : source_path + L".hashcache";
+		std::wstring previous = direct_write ? source : std::wstring();
+		if (!direct_write)
 			ReadUtf8File(output_path, &previous);
-		std::wstring transformed = TransformAssetHashIniDocument(
-			source,
-			previous,
-			observations,
-			legacy_hash_identities,
-			ambiguous_hashes,
-			game_version);
+		std::wstring transformed = mode == CaptureMode::PathConversion
+			? TransformAssetHashIniDocumentToPaths(
+				source,
+				observations,
+				legacy_hash_identities,
+				ambiguous_hashes,
+				game_version)
+			: mode == CaptureMode::CleanPathConversion
+			? TransformAssetHashIniDocumentToCleanPaths(
+				source,
+				observations,
+				legacy_hash_identities,
+				ambiguous_hashes,
+				game_version)
+			: TransformAssetHashIniDocument(
+				source,
+				previous,
+				observations,
+				legacy_hash_identities,
+				ambiguous_hashes,
+				game_version);
 		if (transformed == previous)
 			continue;
 		if (!AtomicWriteUtf8(output_path, transformed)) {
@@ -749,9 +777,12 @@ void ToggleAssetHashCapture(HackerDevice *, void *)
 	EnsureWriterThread();
 	CaptureMode mode = CaptureMode::Off;
 	AcquireSRWLockExclusive(&capture_lock);
-	capture_mode = capture_mode == CaptureMode::Off
-		? CaptureMode::Backup
-		: CaptureMode::Off;
+	if (capture_mode == CaptureMode::Off) {
+		ResetCaptureSessionLocked();
+		capture_mode = CaptureMode::Backup;
+	} else {
+		capture_mode = CaptureMode::Off;
+	}
 	mode = capture_mode;
 	if (mode == CaptureMode::Off)
 		capture_dirty = false;
@@ -778,9 +809,13 @@ void ToggleAggressiveAssetHashCapture(HackerDevice *, void *)
 	EnsureWriterThread();
 	CaptureMode mode = CaptureMode::Off;
 	AcquireSRWLockExclusive(&capture_lock);
-	capture_mode = capture_mode == CaptureMode::Aggressive
-		? CaptureMode::Off
-		: CaptureMode::Aggressive;
+	if (capture_mode == CaptureMode::Aggressive) {
+		capture_mode = CaptureMode::Off;
+	} else {
+		if (capture_mode == CaptureMode::Off)
+			ResetCaptureSessionLocked();
+		capture_mode = CaptureMode::Aggressive;
+	}
 	mode = capture_mode;
 	if (mode == CaptureMode::Off)
 		capture_dirty = false;
@@ -802,6 +837,72 @@ void ToggleAggressiveAssetHashCapture(HackerDevice *, void *)
 		mode == CaptureMode::Aggressive ? "AGGRESSIVE" : "OFF");
 }
 
+void ToggleAssetHashPathConversion(HackerDevice *, void *)
+{
+	EnsureWriterThread();
+	CaptureMode mode = CaptureMode::Off;
+	AcquireSRWLockExclusive(&capture_lock);
+	if (capture_mode == CaptureMode::PathConversion) {
+		capture_mode = CaptureMode::Off;
+	} else {
+		if (capture_mode == CaptureMode::Off)
+			ResetCaptureSessionLocked();
+		capture_mode = CaptureMode::PathConversion;
+	}
+	mode = capture_mode;
+	if (mode == CaptureMode::Off)
+		capture_dirty = false;
+	status_until = GetTickCount() + 2500;
+	ReleaseSRWLockExclusive(&capture_lock);
+
+	if (mode == CaptureMode::PathConversion) {
+		RefreshAssetHashCaptureSources();
+		LogOverlay(
+			LOG_NOTICE,
+			"Asset Hash Capture: ON (PATH CONVERSION)\n");
+	} else {
+		LogOverlay(
+			LOG_NOTICE,
+			"Asset Hash Capture: OFF\n");
+	}
+	LogInfo(
+		"> Asset Hash Capture mode %s\n",
+		mode == CaptureMode::PathConversion ? "PATH CONVERSION" : "OFF");
+}
+
+void ToggleAssetHashCleanPathConversion(HackerDevice *, void *)
+{
+	EnsureWriterThread();
+	CaptureMode mode = CaptureMode::Off;
+	AcquireSRWLockExclusive(&capture_lock);
+	if (capture_mode == CaptureMode::CleanPathConversion) {
+		capture_mode = CaptureMode::Off;
+	} else {
+		if (capture_mode == CaptureMode::Off)
+			ResetCaptureSessionLocked();
+		capture_mode = CaptureMode::CleanPathConversion;
+	}
+	mode = capture_mode;
+	if (mode == CaptureMode::Off)
+		capture_dirty = false;
+	status_until = GetTickCount() + 2500;
+	ReleaseSRWLockExclusive(&capture_lock);
+
+	if (mode == CaptureMode::CleanPathConversion) {
+		RefreshAssetHashCaptureSources();
+		LogOverlay(
+			LOG_NOTICE,
+			"Asset Hash Capture: ON (PATH CLEANUP)\n");
+	} else {
+		LogOverlay(
+			LOG_NOTICE,
+			"Asset Hash Capture: OFF\n");
+	}
+	LogInfo(
+		"> Asset Hash Capture mode %s\n",
+		mode == CaptureMode::CleanPathConversion ? "PATH CLEANUP" : "OFF");
+}
+
 void RefreshAssetHashCaptureSources()
 {
 	std::vector<std::wstring> files;
@@ -809,10 +910,16 @@ void RefreshAssetHashCaptureSources()
 
 	std::set<std::wstring> identities;
 	std::set<uint32_t> legacy_hashes;
+	bool has_identity_aliases = false;
+	bool needs_canonicalization = false;
 	for (const std::wstring& file : files) {
 		std::wstring document;
 		if (!ReadUtf8File(file, &document))
 			continue;
+		has_identity_aliases = has_identity_aliases ||
+			AssetHashIniUsesIdentityAliases(document);
+		needs_canonicalization = needs_canonicalization ||
+			AssetHashIniNeedsCanonicalization(document);
 		std::set<std::wstring> found =
 			CollectAssetHashIniIdentities(document);
 		for (const std::wstring& identity : found) {
@@ -862,7 +969,10 @@ void RefreshAssetHashCaptureSources()
 	}
 	PromoteRecentObservations();
 	if (capture_mode != CaptureMode::Off &&
-			(!captured_hashes.empty() || !recent_assets.empty()))
+			(has_identity_aliases ||
+			 needs_canonicalization ||
+			 !captured_hashes.empty() ||
+			 !recent_assets.empty()))
 		capture_dirty = true;
 	bool signal = capture_dirty;
 	ReleaseSRWLockExclusive(&capture_lock);
@@ -893,12 +1003,13 @@ void ObserveAssetHashForAuthoring(
 	bool recent_changed =
 		AddRecentObservation(resource_address, asset_path, observation);
 
-	if (watched_identities.find(path_key) != watched_identities.end()) {
+	if (write_enabled &&
+			watched_identities.find(path_key) != watched_identities.end()) {
 		if (AddHistoricalObservation(path_key, observation))
 			changed = true;
 	}
 
-	if (!asset_name.empty() &&
+	if (write_enabled && !asset_name.empty() &&
 			watched_identities.find(name_key) !=
 				watched_identities.end()) {
 		std::wstring lowered_name = Lower(asset_name);
@@ -977,6 +1088,10 @@ const wchar_t *AssetHashCaptureStatusText()
 			return L"Asset Hash Capture: ON (BACKUP)";
 		case CaptureMode::Aggressive:
 			return L"Asset Hash Capture: ON (AGGRESSIVE)";
+		case CaptureMode::PathConversion:
+			return L"Asset Hash Capture: ON (PATH CONVERSION)";
+		case CaptureMode::CleanPathConversion:
+			return L"Asset Hash Capture: ON (PATH CLEANUP)";
 		default:
 			return L"Asset Hash Capture: OFF";
 	}

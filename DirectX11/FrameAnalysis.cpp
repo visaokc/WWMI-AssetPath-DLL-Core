@@ -5,6 +5,7 @@
 
 #include "D3D11Wrapper.h"
 #include "FrameAnalysis.h"
+#include "DrawDebugStream.h"
 #include "Globals.h"
 #include "input.h"
 
@@ -46,6 +47,15 @@ FrameAnalysisContext::~FrameAnalysisContext()
 {
 	if (frame_analysis_log)
 		fclose(frame_analysis_log);
+}
+
+void FrameAnalysisContext::RecordDrawDebug(const char *call, uint64_t arg0,
+		uint64_t arg1, uint64_t arg2, uint64_t arg3)
+{
+	DrawDebugStreamRecord(call, arg0, arg1, arg2, arg3,
+		mCurrentVertexShader, mCurrentPixelShader, mCurrentComputeShader,
+		mCurrentGeometryShader, mCurrentHullShader, mCurrentDomainShader,
+		GetCurrentIndexBufferHash(), GetCurrentVertexBufferHash(0));
 }
 
 void FrameAnalysisContext::vFrameAnalysisLog(char *fmt, va_list ap)
@@ -3448,6 +3458,7 @@ STDMETHODIMP_(void) FrameAnalysisContext::Dispatch(THIS_
 			ThreadGroupCountX, ThreadGroupCountY, ThreadGroupCountZ);
 
 	HackerContext::Dispatch(ThreadGroupCountX, ThreadGroupCountY, ThreadGroupCountZ);
+	RecordDrawDebug("Dispatch", ThreadGroupCountX, ThreadGroupCountY, ThreadGroupCountZ);
 
 	if (G->analyse_frame)
 		FrameAnalysisAfterDraw(true, NULL);
@@ -3466,6 +3477,7 @@ STDMETHODIMP_(void) FrameAnalysisContext::DispatchIndirect(THIS_
 	FrameAnalysisLogResourceHash(pBufferForArgs);
 
 	HackerContext::DispatchIndirect(pBufferForArgs, AlignedByteOffsetForArgs);
+	RecordDrawDebug("DispatchIndirect", (uint64_t)pBufferForArgs, AlignedByteOffsetForArgs);
 
 	if (G->analyse_frame)
 		FrameAnalysisAfterDraw(true, NULL);
@@ -4576,6 +4588,7 @@ STDMETHODIMP_(void) FrameAnalysisContext::DrawIndexed(THIS_
 			IndexCount, StartIndexLocation, BaseVertexLocation);
 
 	HackerContext::DrawIndexed(IndexCount, StartIndexLocation, BaseVertexLocation);
+	RecordDrawDebug("DrawIndexed", IndexCount, StartIndexLocation, (uint64_t)(int64_t)BaseVertexLocation);
 
 	if (G->analyse_frame) {
 		DrawCallInfo call_info(DrawCall::DrawIndexed, 0, IndexCount, 0, BaseVertexLocation, StartIndexLocation, 0, NULL, 0);
@@ -4595,6 +4608,7 @@ STDMETHODIMP_(void) FrameAnalysisContext::Draw(THIS_
 			VertexCount, StartVertexLocation);
 
 	HackerContext::Draw(VertexCount, StartVertexLocation);
+	RecordDrawDebug("Draw", VertexCount, StartVertexLocation);
 
 	if (G->analyse_frame) {
 		DrawCallInfo call_info(DrawCall::Draw, VertexCount, 0, 0, StartVertexLocation, 0, 0, NULL, 0);
@@ -4636,6 +4650,8 @@ STDMETHODIMP_(void) FrameAnalysisContext::DrawIndexedInstanced(THIS_
 
 	HackerContext::DrawIndexedInstanced(IndexCountPerInstance, InstanceCount, StartIndexLocation,
 			BaseVertexLocation, StartInstanceLocation);
+	RecordDrawDebug("DrawIndexedInstanced", IndexCountPerInstance, InstanceCount,
+		StartIndexLocation, StartInstanceLocation);
 
 	if (G->analyse_frame) {
 		DrawCallInfo call_info(DrawCall::DrawIndexedInstanced, 0, IndexCountPerInstance, InstanceCount, BaseVertexLocation, StartIndexLocation, StartInstanceLocation, NULL, 0);
@@ -4659,6 +4675,8 @@ STDMETHODIMP_(void) FrameAnalysisContext::DrawInstanced(THIS_
 			VertexCountPerInstance, InstanceCount, StartVertexLocation, StartInstanceLocation);
 
 	HackerContext::DrawInstanced(VertexCountPerInstance, InstanceCount, StartVertexLocation, StartInstanceLocation);
+	RecordDrawDebug("DrawInstanced", VertexCountPerInstance, InstanceCount,
+		StartVertexLocation, StartInstanceLocation);
 
 	if (G->analyse_frame) {
 		DrawCallInfo call_info(DrawCall::DrawInstanced, VertexCountPerInstance, 0, InstanceCount, StartVertexLocation, 0, StartInstanceLocation, NULL, 0);
@@ -4757,6 +4775,7 @@ STDMETHODIMP_(void) FrameAnalysisContext::DrawAuto(THIS)
 	FrameAnalysisLog("DrawAuto()\n");
 
 	HackerContext::DrawAuto();
+	RecordDrawDebug("DrawAuto");
 
 	if (G->analyse_frame) {
 		DrawCallInfo call_info(DrawCall::DrawAuto, 0, 0, 0, 0, 0, 0, NULL, 0);
@@ -4777,6 +4796,8 @@ STDMETHODIMP_(void) FrameAnalysisContext::DrawIndexedInstancedIndirect(THIS_
 	FrameAnalysisLogResourceHash(pBufferForArgs);
 
 	HackerContext::DrawIndexedInstancedIndirect(pBufferForArgs, AlignedByteOffsetForArgs);
+	RecordDrawDebug("DrawIndexedInstancedIndirect", (uint64_t)pBufferForArgs,
+		AlignedByteOffsetForArgs);
 
 	if (G->analyse_frame) {
 		DrawCallInfo call_info(DrawCall::DrawIndexedInstancedIndirect, 0, 0, 0, 0, 0, 0, &pBufferForArgs, AlignedByteOffsetForArgs);
@@ -4797,6 +4818,8 @@ STDMETHODIMP_(void) FrameAnalysisContext::DrawInstancedIndirect(THIS_
 	FrameAnalysisLogResourceHash(pBufferForArgs);
 
 	HackerContext::DrawInstancedIndirect(pBufferForArgs, AlignedByteOffsetForArgs);
+	RecordDrawDebug("DrawInstancedIndirect", (uint64_t)pBufferForArgs,
+		AlignedByteOffsetForArgs);
 
 	if (G->analyse_frame) {
 		DrawCallInfo call_info(DrawCall::DrawInstancedIndirect, 0, 0, 0, 0, 0, 0, &pBufferForArgs, AlignedByteOffsetForArgs);

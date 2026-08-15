@@ -20,6 +20,8 @@ public:
 void TimeoutHuntingBuffers();
 void ParseHuntingSection();
 void DumpUsage(wchar_t *dir);
+void FinishDrawDebugCapture();
+void UpdateDrawDebugControl(HackerDevice *device);
 
 void RegisterVisitedIndexBufferNoLock(uint32_t hash);
 void RegisterVisitedIndexBuffer(uint32_t hash);

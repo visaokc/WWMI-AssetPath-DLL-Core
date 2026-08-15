@@ -9,15 +9,36 @@ namespace
 {
 const wchar_t *kBlockBegin = L"; <asset-hash-stream>";
 const wchar_t *kBlockEnd = L"; </asset-hash-stream>";
+const wchar_t *kMipMultiplicityKey = L"asset_hash_mip_multiplicity";
+constexpr uint32_t kMaxMipMultiplicity = 32;
+
+struct MipDimensions
+{
+	uint32_t width;
+	uint32_t height;
+
+	bool operator<(const MipDimensions& other) const
+	{
+		return width < other.width ||
+			(width == other.width && height < other.height);
+	}
+};
+
+typedef std::map<MipDimensions, uint32_t> MipMultiplicityMap;
 
 struct SectionData
 {
 	std::wstring identity_key;
 	std::wstring identity_name;
 	std::wstring identity_value;
+	std::vector<std::pair<std::wstring, std::wstring>> additional_identities;
+	bool identity_alias = false;
+	bool active_path_identity = false;
+	bool generated_block = false;
 	std::wstring section_name;
 	std::vector<std::wstring> body;
 	std::vector<AssetHashObservation> hashes;
+	MipMultiplicityMap mip_multiplicities;
 };
 
 std::wstring Trim(const std::wstring& value)
@@ -130,11 +151,70 @@ bool ParseDimensions(const std::wstring& line, uint32_t *width, uint32_t *height
 	return true;
 }
 
+bool ParseUnknownDimensions(const std::wstring& line)
+{
+	return Lower(Trim(line)) == L"; unknown-resolution";
+}
+
+bool ParseMipMultiplicity(const std::wstring& value, uint32_t *multiplicity)
+{
+	wchar_t *end = nullptr;
+	unsigned long parsed = wcstoul(value.c_str(), &end, 10);
+	if (end == value.c_str() || *Trim(end).c_str() ||
+			parsed < 2 || parsed > kMaxMipMultiplicity)
+		return false;
+	*multiplicity = static_cast<uint32_t>(parsed);
+	return true;
+}
+
 std::wstring IdentityKey(
 	const std::wstring& name,
 	const std::wstring& value)
 {
 	return Lower(name) + L"=" + Lower(value);
+}
+
+std::wstring CanonicalIdentityName(const std::wstring& key)
+{
+	if (key == L"match_asset_path" || key == L"path")
+		return L"match_asset_path";
+	if (key == L"match_asset_name" || key == L"name")
+		return L"match_asset_name";
+	return std::wstring();
+}
+
+void AddIdentity(
+	SectionData *data,
+	const std::wstring& name,
+	const std::wstring& value)
+{
+	std::wstring key = IdentityKey(name, value);
+	if (data->identity_key == key)
+		return;
+	for (const auto& identity : data->additional_identities) {
+		if (IdentityKey(identity.first, identity.second) == key)
+			return;
+	}
+
+	if (data->identity_key.empty()) {
+		data->identity_name = name;
+		data->identity_value = value;
+		data->identity_key = key;
+		return;
+	}
+
+	if (name == L"match_asset_path" &&
+			data->identity_name == L"match_asset_name") {
+		data->additional_identities.push_back({
+			data->identity_name,
+			data->identity_value});
+		data->identity_name = name;
+		data->identity_value = value;
+		data->identity_key = key;
+		return;
+	}
+
+	data->additional_identities.push_back({name, value});
 }
 
 SectionData ParseSection(
@@ -164,17 +244,32 @@ SectionData ParseSection(
 			has_pending_dimensions = true;
 			continue;
 		}
+		if (ParseUnknownDimensions(lines[i])) {
+			pending_width = 0;
+			pending_height = 0;
+			has_pending_dimensions = true;
+			continue;
+		}
 
 		std::wstring key;
 		std::wstring value;
 		bool commented = false;
 		if (ParseAssignment(lines[i], &key, &value, &commented)) {
-			if ((key == L"match_asset_path" ||
-					key == L"match_asset_name") &&
-					data.identity_key.empty()) {
-				data.identity_name = key;
-				data.identity_value = value;
-				data.identity_key = IdentityKey(key, value);
+			if (key == kMipMultiplicityKey && commented &&
+					has_pending_dimensions) {
+				uint32_t multiplicity = 0;
+				if (ParseMipMultiplicity(value, &multiplicity)) {
+					data.mip_multiplicities[
+						{pending_width, pending_height}] = multiplicity;
+				}
+				continue;
+			}
+			std::wstring identity_name = CanonicalIdentityName(key);
+			if (!identity_name.empty()) {
+				AddIdentity(&data, identity_name, value);
+				data.identity_alias = data.identity_alias || key != identity_name;
+				data.active_path_identity = data.active_path_identity ||
+					(!commented && identity_name == L"match_asset_path");
 				continue;
 			}
 			if (key == L"hash" && !commented) {
@@ -206,6 +301,7 @@ SectionData ParseBlock(
 	size_t end)
 {
 	SectionData data;
+	data.generated_block = true;
 	uint32_t pending_width = 0;
 	uint32_t pending_height = 0;
 	bool has_pending_dimensions = false;
@@ -218,6 +314,12 @@ SectionData ParseBlock(
 		if (ParseDimensions(lines[i], &width, &height)) {
 			pending_width = width;
 			pending_height = height;
+			has_pending_dimensions = true;
+			continue;
+		}
+		if (ParseUnknownDimensions(lines[i])) {
+			pending_width = 0;
+			pending_height = 0;
 			has_pending_dimensions = true;
 			continue;
 		}
@@ -242,12 +344,21 @@ SectionData ParseBlock(
 		std::wstring value;
 		bool commented = false;
 		if (ParseAssignment(lines[i], &key, &value, &commented)) {
-			if ((key == L"match_asset_path" ||
-					key == L"match_asset_name") &&
-					data.identity_key.empty()) {
-				data.identity_name = key;
-				data.identity_value = value;
-				data.identity_key = IdentityKey(key, value);
+			if (key == kMipMultiplicityKey && commented &&
+					has_pending_dimensions) {
+				uint32_t multiplicity = 0;
+				if (ParseMipMultiplicity(value, &multiplicity)) {
+					data.mip_multiplicities[
+						{pending_width, pending_height}] = multiplicity;
+				}
+				continue;
+			}
+			std::wstring identity_name = CanonicalIdentityName(key);
+			if (!identity_name.empty()) {
+				AddIdentity(&data, identity_name, value);
+				data.identity_alias = data.identity_alias || key != identity_name;
+				data.active_path_identity = data.active_path_identity ||
+					(!commented && identity_name == L"match_asset_path");
 				continue;
 			}
 			if (key == L"hash" && !commented) {
@@ -336,11 +447,81 @@ void AppendHashObservations(
 	NormalizeHashes(hashes);
 }
 
+void MergeMipMultiplicities(
+	MipMultiplicityMap *multiplicities,
+	const MipMultiplicityMap& additional)
+{
+	for (const auto& entry : additional) {
+		auto existing = multiplicities->find(entry.first);
+		if (existing == multiplicities->end() ||
+				entry.second > existing->second)
+			(*multiplicities)[entry.first] = entry.second;
+	}
+}
+
+std::map<MipDimensions, std::vector<AssetHashObservation>> GroupHashesByMip(
+	const std::vector<AssetHashObservation>& hashes)
+{
+	std::map<MipDimensions, std::vector<AssetHashObservation>> groups;
+	for (const AssetHashObservation& observation : hashes) {
+		groups[{observation.width, observation.height}].push_back(observation);
+	}
+	for (auto& group : groups)
+		NormalizeHashes(&group.second);
+	return groups;
+}
+
+MipMultiplicityMap DetectMipMultiplicities(
+	const std::vector<AssetHashObservation>& hashes)
+{
+	MipMultiplicityMap multiplicities;
+	for (const auto& group : GroupHashesByMip(hashes)) {
+		if (group.second.size() > 1) {
+			multiplicities[group.first] =
+				static_cast<uint32_t>(group.second.size());
+		}
+	}
+	return multiplicities;
+}
+
 void MergeHashObservations(
 	std::vector<AssetHashObservation> *hashes,
+	MipMultiplicityMap *multiplicities,
 	const std::vector<AssetHashObservation>& observed)
 {
-	AppendHashObservations(hashes, observed);
+	std::map<MipDimensions, std::vector<AssetHashObservation>> stored_groups =
+		GroupHashesByMip(*hashes);
+	std::map<MipDimensions, std::vector<AssetHashObservation>> observed_groups =
+		GroupHashesByMip(observed);
+
+	for (const auto& observed_group : observed_groups) {
+		auto marked = multiplicities->find(observed_group.first);
+		uint32_t required = marked == multiplicities->end()
+			? 1
+			: marked->second;
+		if (observed_group.second.size() >= required) {
+			stored_groups[observed_group.first] = observed_group.second;
+			if (observed_group.second.size() > 1) {
+				(*multiplicities)[observed_group.first] =
+					static_cast<uint32_t>(observed_group.second.size());
+			} else {
+				multiplicities->erase(observed_group.first);
+			}
+		} else {
+			AppendHashObservations(
+				&stored_groups[observed_group.first],
+				observed_group.second);
+		}
+	}
+
+	hashes->clear();
+	for (const auto& stored_group : stored_groups) {
+		hashes->insert(
+			hashes->end(),
+			stored_group.second.begin(),
+			stored_group.second.end());
+	}
+	NormalizeHashes(hashes);
 }
 
 void RemoveAmbiguousHashes(
@@ -360,13 +541,27 @@ void RemoveAmbiguousHashes(
 
 void TrimBodyBlankLines(std::vector<std::wstring> *body);
 
+std::wstring PathSectionName(
+	const std::wstring& source_name,
+	const std::wstring& asset_path);
+
 void AppendIdentitySection(
 	std::vector<std::wstring> *output,
 	const SectionData& section)
 {
-	output->push_back(L"[" + section.section_name + L"]");
+	std::wstring section_name = section.section_name;
+	if (section.generated_block &&
+			section.identity_name == L"match_asset_path") {
+		section_name = PathSectionName(
+			section.section_name,
+			section.identity_value);
+	}
+	output->push_back(L"[" + section_name + L"]");
 	output->push_back(
 		section.identity_name + L" = " + section.identity_value);
+	for (const auto& identity : section.additional_identities) {
+		output->push_back(identity.first + L" = " + identity.second);
+	}
 	std::vector<std::wstring> body = section.body;
 	TrimBodyBlankLines(&body);
 	output->insert(output->end(), body.begin(), body.end());
@@ -381,36 +576,237 @@ void TrimBodyBlankLines(std::vector<std::wstring> *body)
 		body->pop_back();
 }
 
+void RemoveZeroMatchPriority(std::vector<std::wstring> *body)
+{
+	body->erase(
+		std::remove_if(
+			body->begin(),
+			body->end(),
+			[](const std::wstring& line) {
+				std::wstring key;
+				std::wstring value;
+				bool commented = false;
+				return ParseAssignment(line, &key, &value, &commented) &&
+					!commented && key == L"match_priority" &&
+					Trim(value) == L"0";
+			}),
+		body->end());
+}
+
+std::wstring BaseSectionName(std::wstring section_name)
+{
+	std::wstring lowered = Lower(section_name);
+	size_t legacy_suffix = lowered.find(L"_assethash_");
+	if (legacy_suffix != std::wstring::npos) {
+		section_name.resize(legacy_suffix);
+		return section_name;
+	}
+
+	size_t separator = section_name.rfind(L'_');
+	if (separator == std::wstring::npos ||
+			section_name.size() - separator - 1 != 8)
+		return section_name;
+	for (size_t i = separator + 1; i < section_name.size(); ++i) {
+		if (!iswxdigit(section_name[i]))
+			return section_name;
+	}
+	section_name.resize(separator);
+	return section_name;
+}
+
+std::wstring AssetPathSectionName(const std::wstring& asset_path)
+{
+	size_t separator = asset_path.rfind(L'.');
+	if (separator == std::wstring::npos || separator + 1 == asset_path.size())
+		separator = asset_path.find_last_of(L"/\\");
+	std::wstring name = separator == std::wstring::npos ?
+		asset_path : asset_path.substr(separator + 1);
+	for (wchar_t& character : name) {
+		if (!iswalnum(character) && character != L'_' && character != L'-')
+			character = L'_';
+	}
+	return name.empty() ? L"asset" : name;
+}
+
+std::wstring PathSectionName(
+	const std::wstring& source_name,
+	const std::wstring& asset_path)
+{
+	std::wstring base_name = BaseSectionName(source_name);
+	const std::wstring generic_texture_suffix = L"_texture";
+	if (base_name.size() >= generic_texture_suffix.size() &&
+			Lower(base_name.substr(
+				base_name.size() - generic_texture_suffix.size())) ==
+				generic_texture_suffix) {
+		base_name.resize(base_name.size() - generic_texture_suffix.size());
+	}
+	std::wstring suffix = L"_" + AssetPathSectionName(asset_path);
+	if (base_name.size() >= suffix.size() &&
+			Lower(base_name.substr(base_name.size() - suffix.size())) ==
+				Lower(suffix))
+		return base_name;
+	return base_name + suffix;
+}
+
+bool NeedsPathSectionCanonicalization(const SectionData& section)
+{
+	return section.generated_block && section.active_path_identity &&
+		section.identity_name == L"match_asset_path" &&
+		section.section_name != PathSectionName(
+			section.section_name,
+			section.identity_value);
+}
+
 std::wstring GeneratedSectionName(
 	const std::wstring& source_name,
 	const std::wstring& hash_text)
 {
-	std::wstring base_name = source_name;
-	std::wstring lowered = Lower(base_name);
-	size_t legacy_suffix = lowered.find(L"_assethash_");
-	if (legacy_suffix != std::wstring::npos)
-		base_name.erase(legacy_suffix);
+	return BaseSectionName(source_name) + L"_" + hash_text;
+}
 
-	size_t separator = base_name.rfind(L'_');
-	if (separator != std::wstring::npos &&
-			base_name.size() - separator - 1 == 8) {
-		bool hash_suffix = true;
-		for (size_t i = separator + 1; i < base_name.size(); ++i) {
-			if (!iswxdigit(base_name[i])) {
-				hash_suffix = false;
-				break;
-			}
-		}
-		if (hash_suffix)
-			return base_name.substr(0, separator + 1) + hash_text;
+void AppendPathBlockStart(
+	std::vector<std::wstring> *output,
+	const SectionData& source,
+	const std::wstring& asset_path,
+	const std::wstring& game_version)
+{
+	std::vector<std::wstring> body = source.body;
+	TrimBodyBlankLines(&body);
+	RemoveZeroMatchPriority(&body);
+	output->push_back(kBlockBegin);
+	output->push_back(L"; match_asset_path = " + asset_path);
+	for (const auto& identity : source.additional_identities) {
+		output->push_back(L"; " + identity.first + L" = " + identity.second);
 	}
-	return base_name + L"_" + hash_text;
+	output->push_back(L"; asset_hash_compiler_version = Ver1.1");
+	output->push_back(L"; game_version = " + game_version);
+	output->push_back(
+		L"[" + PathSectionName(source.section_name, asset_path) + L"]");
+	output->push_back(L"match_asset_path = " + asset_path);
+	for (const auto& identity : source.additional_identities) {
+		output->push_back(identity.first + L" = " + identity.second);
+	}
+	output->insert(output->end(), body.begin(), body.end());
+}
+
+void AppendPathBlockEnd(std::vector<std::wstring> *output)
+{
+	output->push_back(L"");
+	output->push_back(kBlockEnd);
+}
+
+void AppendPathBlock(
+	std::vector<std::wstring> *output,
+	const SectionData& source,
+	const std::wstring& asset_path,
+	const std::wstring& game_version)
+{
+	AppendPathBlockStart(output, source, asset_path, game_version);
+	AppendPathBlockEnd(output);
+}
+
+void AppendUnverifiedHashSections(
+	std::vector<std::wstring> *output,
+	const SectionData& source,
+	const std::wstring& asset_path,
+	std::vector<AssetHashObservation> hashes)
+{
+	NormalizeHashes(&hashes);
+	std::vector<std::wstring> body = source.body;
+	TrimBodyBlankLines(&body);
+	for (size_t i = 0; i < hashes.size(); ++i) {
+		const AssetHashObservation& observation = hashes[i];
+		output->push_back(L"");
+		if (observation.width && observation.height) {
+			output->push_back(
+				L"; " + std::to_wstring(observation.width) + L"x" +
+				std::to_wstring(observation.height));
+		} else {
+			output->push_back(L"; unknown-resolution");
+		}
+		const MipDimensions dimensions = {
+			observation.width,
+			observation.height};
+		bool first_at_mip = !i ||
+			hashes[i - 1].width != observation.width ||
+			hashes[i - 1].height != observation.height;
+		auto multiplicity = source.mip_multiplicities.find(dimensions);
+		if (first_at_mip && multiplicity != source.mip_multiplicities.end()) {
+			output->push_back(
+				L"; " + std::wstring(kMipMultiplicityKey) + L" = " +
+				std::to_wstring(multiplicity->second));
+		}
+		wchar_t hash_text[9];
+		swprintf(hash_text, 9, L"%08x", observation.hash);
+		output->push_back(
+			L"[" + PathSectionName(source.section_name, asset_path) +
+			L"_" + hash_text + L"]");
+		output->push_back(L"hash = " + std::wstring(hash_text));
+		output->insert(output->end(), body.begin(), body.end());
+	}
+}
+
+void AppendPathBlockWithUnverifiedHashes(
+	std::vector<std::wstring> *output,
+	const SectionData& source,
+	const std::wstring& asset_path,
+	const std::wstring& game_version,
+	const std::vector<AssetHashObservation>& unverified_hashes)
+{
+	AppendPathBlockStart(output, source, asset_path, game_version);
+	AppendUnverifiedHashSections(
+		output,
+		source,
+		asset_path,
+		unverified_hashes);
+	AppendPathBlockEnd(output);
+}
+
+bool ResolveObservedPath(
+	const SectionData& section,
+	const AssetHashObservationMap& observations,
+	const AssetHashPathIdentityMap& legacy_hash_identities,
+	const std::set<uint32_t>& ambiguous_hashes,
+	std::wstring *asset_path,
+	std::vector<AssetHashObservation> *current_hashes)
+{
+	auto observed = observations.find(section.identity_key);
+	if (observed == observations.end())
+		return false;
+	if (section.identity_name == L"match_asset_path") {
+		*asset_path = section.identity_value;
+		*current_hashes = observed->second;
+		NormalizeHashes(current_hashes);
+		return !current_hashes->empty();
+	}
+
+	std::wstring resolved_path;
+	for (const AssetHashObservation& observation : observed->second) {
+		if (ambiguous_hashes.find(observation.hash) != ambiguous_hashes.end())
+			continue;
+		auto identity = legacy_hash_identities.find(observation.hash);
+		if (identity == legacy_hash_identities.end())
+			continue;
+		if (!resolved_path.empty() &&
+				_wcsicmp(
+					resolved_path.c_str(),
+					identity->second.asset_path.c_str()))
+			return false;
+		resolved_path = identity->second.asset_path;
+		AppendHashObservations(current_hashes, identity->second.hashes);
+	}
+	if (resolved_path.empty() || current_hashes->empty())
+		return false;
+	*asset_path = resolved_path;
+	RemoveAmbiguousHashes(current_hashes, ambiguous_hashes);
+	return !current_hashes->empty();
 }
 
 void AppendGeneratedBlock(
 	std::vector<std::wstring> *output,
 	const SectionData& source,
 	std::vector<AssetHashObservation> hashes,
+	const MipMultiplicityMap& mip_multiplicities,
 	const std::wstring& game_version)
 {
 	NormalizeHashes(&hashes);
@@ -419,11 +815,17 @@ void AppendGeneratedBlock(
 	output->push_back(kBlockBegin);
 	output->push_back(
 		L"; " + source.identity_name + L" = " + source.identity_value);
-	output->push_back(L"; asset_hash_compiler_version = Ver1.0");
+	for (const auto& identity : source.additional_identities) {
+		output->push_back(L"; " + identity.first + L" = " + identity.second);
+	}
+	output->push_back(L"; asset_hash_compiler_version = Ver1.1");
 	output->push_back(L"; game_version = " + game_version);
 
 	for (size_t i = 0; i < hashes.size(); ++i) {
 		const AssetHashObservation& observation = hashes[i];
+		const MipDimensions dimensions = {
+			observation.width,
+			observation.height};
 		if (i)
 			output->push_back(L"");
 		if (observation.width && observation.height) {
@@ -432,6 +834,16 @@ void AppendGeneratedBlock(
 				std::to_wstring(observation.height));
 		} else {
 			output->push_back(L"; unknown-resolution");
+		}
+		bool first_at_mip = !i ||
+			hashes[i - 1].width != observation.width ||
+			hashes[i - 1].height != observation.height;
+		auto multiplicity = mip_multiplicities.find(dimensions);
+		if (first_at_mip && multiplicity != mip_multiplicities.end() &&
+				multiplicity->second > 1) {
+			output->push_back(
+				L"; " + std::wstring(kMipMultiplicityKey) + L" = " +
+				std::to_wstring(multiplicity->second));
 		}
 		wchar_t hash_text[9];
 		swprintf(hash_text, 9, L"%08x", observation.hash);
@@ -455,17 +867,99 @@ std::set<std::wstring> CollectAssetHashIniIdentities(
 {
 	std::set<std::wstring> identities;
 	std::vector<std::wstring> lines = SplitLines(document);
-	for (const std::wstring& line : lines) {
-		std::wstring key;
-		std::wstring value;
-		bool commented = false;
-		if (!ParseAssignment(line, &key, &value, &commented))
+	for (size_t i = 0; i < lines.size();) {
+		if (Trim(lines[i]) == kBlockBegin) {
+			size_t end = i + 1;
+			while (end < lines.size() && Trim(lines[end]) != kBlockEnd)
+				++end;
+			if (end < lines.size()) {
+				SectionData block = ParseBlock(lines, i, end);
+				if (!block.identity_key.empty())
+					identities.insert(block.identity_key);
+				for (const auto& identity : block.additional_identities) {
+					identities.insert(IdentityKey(identity.first, identity.second));
+				}
+				++end;
+			}
+			i = end;
 			continue;
-		if (key == L"match_asset_path" ||
-				key == L"match_asset_name")
-			identities.insert(IdentityKey(key, value));
+		}
+		std::wstring section_name;
+		if (!ParseSectionHeader(lines[i], &section_name) ||
+				!StartsWithInsensitive(section_name, L"TextureOverride")) {
+			++i;
+			continue;
+		}
+		size_t end = i + 1;
+		std::wstring next_section;
+		while (end < lines.size() &&
+				!ParseSectionHeader(lines[end], &next_section) &&
+				Trim(lines[end]) != kBlockBegin)
+			++end;
+		SectionData section = ParseSection(lines, i, end);
+		if (!section.identity_key.empty())
+			identities.insert(section.identity_key);
+		for (const auto& identity : section.additional_identities) {
+			identities.insert(IdentityKey(identity.first, identity.second));
+		}
+		i = end;
 	}
 	return identities;
+}
+
+bool AssetHashIniUsesIdentityAliases(const std::wstring& document)
+{
+	std::vector<std::wstring> lines = SplitLines(document);
+	for (size_t i = 0; i < lines.size();) {
+		if (Trim(lines[i]) == kBlockBegin) {
+			size_t end = i + 1;
+			while (end < lines.size() && Trim(lines[end]) != kBlockEnd)
+				++end;
+			if (end < lines.size()) {
+				if (ParseBlock(lines, i, end).identity_alias)
+					return true;
+				++end;
+			}
+			i = end;
+			continue;
+		}
+		std::wstring section_name;
+		if (!ParseSectionHeader(lines[i], &section_name) ||
+				!StartsWithInsensitive(section_name, L"TextureOverride")) {
+			++i;
+			continue;
+		}
+		size_t end = i + 1;
+		std::wstring next_section;
+		while (end < lines.size() &&
+				!ParseSectionHeader(lines[end], &next_section) &&
+				Trim(lines[end]) != kBlockBegin)
+			++end;
+		if (ParseSection(lines, i, end).identity_alias)
+			return true;
+		i = end;
+	}
+	return false;
+}
+
+bool AssetHashIniNeedsCanonicalization(const std::wstring& document)
+{
+	std::vector<std::wstring> lines = SplitLines(document);
+	for (size_t i = 0; i < lines.size();) {
+		if (Trim(lines[i]) != kBlockBegin) {
+			++i;
+			continue;
+		}
+		size_t end = i + 1;
+		while (end < lines.size() && Trim(lines[end]) != kBlockEnd)
+			++end;
+		if (end == lines.size())
+			return false;
+		if (NeedsPathSectionCanonicalization(ParseBlock(lines, i, end)))
+			return true;
+		i = end + 1;
+	}
+	return false;
 }
 
 std::set<uint32_t> CollectAssetHashIniLegacyHashes(
@@ -603,24 +1097,43 @@ std::wstring TransformAssetHashIniDocument(
 			}
 			SectionData block = ParseBlock(lines, i, end);
 			std::vector<AssetHashObservation> hashes = block.hashes;
+			MipMultiplicityMap mip_multiplicities =
+				block.mip_multiplicities;
 			auto old = previous.find(block.identity_key);
-			if (old != previous.end())
+			if (old != previous.end()) {
 				AppendHashObservations(&hashes, old->second.hashes);
+				MergeMipMultiplicities(
+					&mip_multiplicities,
+					old->second.mip_multiplicities);
+			}
+			RemoveAmbiguousHashes(&hashes, ambiguous_hashes);
 			auto observed = observations.find(block.identity_key);
-				if (observed != observations.end()) {
-					MergeHashObservations(
-						&hashes,
-						observed->second);
-				}
-				RemoveAmbiguousHashes(&hashes, ambiguous_hashes);
-				if (hashes.empty())
-					AppendIdentitySection(&output, block);
-				else
-					AppendGeneratedBlock(
-						&output,
-						block,
-						hashes,
-						game_version);
+			if (observed != observations.end()) {
+				std::vector<AssetHashObservation> safe_observed =
+					observed->second;
+				RemoveAmbiguousHashes(
+					&safe_observed,
+					ambiguous_hashes);
+				MergeHashObservations(
+					&hashes,
+					&mip_multiplicities,
+					safe_observed);
+			}
+			if (hashes.empty() && block.active_path_identity)
+				AppendPathBlock(
+					&output,
+					block,
+					block.identity_value,
+					game_version);
+			else if (hashes.empty())
+				AppendIdentitySection(&output, block);
+			else
+				AppendGeneratedBlock(
+					&output,
+					block,
+					hashes,
+					mip_multiplicities,
+					game_version);
 			i = end + 1;
 			continue;
 		}
@@ -660,6 +1173,8 @@ std::wstring TransformAssetHashIniDocument(
 								&output,
 								section,
 								group->second.hashes,
+								DetectMipMultiplicities(
+									group->second.hashes),
 								game_version);
 						}
 						i = end;
@@ -676,30 +1191,396 @@ std::wstring TransformAssetHashIniDocument(
 		}
 
 		std::vector<AssetHashObservation> hashes = section.hashes;
+		MipMultiplicityMap mip_multiplicities =
+			section.mip_multiplicities;
 		auto old = previous.find(section.identity_key);
-		if (old != previous.end())
+		if (old != previous.end()) {
 			AppendHashObservations(&hashes, old->second.hashes);
+			MergeMipMultiplicities(
+				&mip_multiplicities,
+				old->second.mip_multiplicities);
+		}
+		RemoveAmbiguousHashes(&hashes, ambiguous_hashes);
 		auto observed = observations.find(section.identity_key);
-			if (observed != observations.end()) {
-				MergeHashObservations(
-					&hashes,
-					observed->second);
-			}
-			RemoveAmbiguousHashes(&hashes, ambiguous_hashes);
+		if (observed != observations.end()) {
+			std::vector<AssetHashObservation> safe_observed =
+				observed->second;
+			RemoveAmbiguousHashes(
+				&safe_observed,
+				ambiguous_hashes);
+			MergeHashObservations(
+				&hashes,
+				&mip_multiplicities,
+				safe_observed);
+		}
 
-			if (hashes.empty()) {
+		if (hashes.empty()) {
+			if (section.identity_alias) {
+				AppendIdentitySection(&output, section);
+			} else {
 				output.insert(
-				output.end(),
-				lines.begin() + i,
-				lines.begin() + end);
+					output.end(),
+					lines.begin() + i,
+					lines.begin() + end);
+			}
 		} else {
-				AppendGeneratedBlock(
-					&output,
-					section,
-					hashes,
-					game_version);
+			AppendGeneratedBlock(
+				&output,
+				section,
+				hashes,
+				mip_multiplicities,
+				game_version);
 		}
 		i = end;
 	}
 	return JoinLines(output);
+}
+
+static std::wstring TransformAssetHashIniDocumentToPathsInternal(
+	const std::wstring& source,
+	const AssetHashObservationMap& observations,
+	const AssetHashPathIdentityMap& legacy_hash_identities,
+	const std::set<uint32_t>& ambiguous_hashes,
+	const std::wstring& game_version,
+	bool remove_unverified_stream_hashes)
+{
+	struct LegacyPathGroup
+	{
+		std::wstring asset_path;
+		SectionData source;
+		std::vector<std::wstring> comparable_body;
+		bool safe;
+	};
+
+	std::vector<std::wstring> lines = SplitLines(source);
+	std::map<std::wstring, LegacyPathGroup> legacy_path_groups;
+	std::set<std::wstring> validated_identity_paths;
+	std::map<uint32_t, std::wstring> validated_hash_paths;
+	std::set<uint32_t> ambiguous_validated_hashes;
+	auto record_validated_path = [&validated_hash_paths,
+			&ambiguous_validated_hashes](
+			const std::wstring& asset_path,
+			const std::vector<AssetHashObservation>& current_hashes) {
+		for (const AssetHashObservation& observation : current_hashes) {
+			if (ambiguous_validated_hashes.find(observation.hash) !=
+					ambiguous_validated_hashes.end())
+				continue;
+			auto inserted = validated_hash_paths.emplace(
+				observation.hash,
+				asset_path);
+			if (!inserted.second &&
+					_wcsicmp(inserted.first->second.c_str(), asset_path.c_str())) {
+				validated_hash_paths.erase(inserted.first);
+				ambiguous_validated_hashes.insert(observation.hash);
+			}
+		}
+	};
+
+	for (size_t i = 0; i < lines.size();) {
+		if (Trim(lines[i]) == kBlockBegin) {
+			size_t end = i + 1;
+			while (end < lines.size() && Trim(lines[end]) != kBlockEnd)
+				++end;
+			if (end < lines.size()) {
+				SectionData block = ParseBlock(lines, i, end);
+				std::wstring asset_path;
+				std::vector<AssetHashObservation> current_hashes;
+				if (ResolveObservedPath(
+						block,
+						observations,
+						legacy_hash_identities,
+						ambiguous_hashes,
+						&asset_path,
+						&current_hashes)) {
+					validated_identity_paths.insert(Lower(asset_path));
+					record_validated_path(asset_path, current_hashes);
+				}
+				++end;
+			}
+			i = end;
+			continue;
+		}
+		std::wstring section_name;
+		if (!ParseSectionHeader(lines[i], &section_name) ||
+				!StartsWithInsensitive(section_name, L"TextureOverride")) {
+			++i;
+			continue;
+		}
+		size_t end = i + 1;
+		std::wstring next_section;
+		while (end < lines.size() &&
+				!ParseSectionHeader(lines[end], &next_section) &&
+				Trim(lines[end]) != kBlockBegin)
+			++end;
+		SectionData section = ParseSection(lines, i, end);
+		if (!section.identity_key.empty()) {
+			std::wstring asset_path;
+			std::vector<AssetHashObservation> current_hashes;
+			if (ResolveObservedPath(
+					section,
+					observations,
+					legacy_hash_identities,
+					ambiguous_hashes,
+					&asset_path,
+					&current_hashes)) {
+				validated_identity_paths.insert(Lower(asset_path));
+				record_validated_path(asset_path, current_hashes);
+			}
+		}
+		i = end;
+	}
+
+	for (size_t i = 0; i < lines.size();) {
+		if (Trim(lines[i]) == kBlockBegin) {
+			size_t end = i + 1;
+			while (end < lines.size() && Trim(lines[end]) != kBlockEnd)
+				++end;
+			if (end < lines.size())
+				++end;
+			i = end;
+			continue;
+		}
+		std::wstring section_name;
+		if (!ParseSectionHeader(lines[i], &section_name) ||
+				!StartsWithInsensitive(section_name, L"TextureOverride")) {
+			++i;
+			continue;
+		}
+		size_t end = i + 1;
+		std::wstring next_section;
+		while (end < lines.size() &&
+				!ParseSectionHeader(lines[end], &next_section) &&
+				Trim(lines[end]) != kBlockBegin)
+			++end;
+		SectionData section = ParseSection(lines, i, end);
+		if (!section.identity_key.empty()) {
+			i = end;
+			continue;
+		}
+		if (section.hashes.size() == 1 &&
+				ambiguous_hashes.find(section.hashes.front().hash) ==
+					ambiguous_hashes.end()) {
+			const uint32_t hash = section.hashes.front().hash;
+			std::wstring asset_path;
+			auto validated = validated_hash_paths.find(hash);
+			if (validated != validated_hash_paths.end()) {
+				asset_path = validated->second;
+			} else {
+				auto identity = legacy_hash_identities.find(hash);
+				if (identity != legacy_hash_identities.end())
+					asset_path = identity->second.asset_path;
+			}
+			if (!asset_path.empty()) {
+				std::wstring path_key = Lower(asset_path);
+				std::vector<std::wstring> comparable_body = section.body;
+				TrimBodyBlankLines(&comparable_body);
+				RemoveZeroMatchPriority(&comparable_body);
+				auto group = legacy_path_groups.find(path_key);
+				if (group == legacy_path_groups.end()) {
+					legacy_path_groups.emplace(
+						path_key,
+						LegacyPathGroup{
+							asset_path,
+							section,
+							comparable_body,
+							true});
+				} else if (group->second.comparable_body != comparable_body) {
+					group->second.safe = false;
+				}
+			}
+		}
+		i = end;
+	}
+
+	std::vector<std::wstring> output;
+	std::set<std::wstring> emitted_legacy_paths = validated_identity_paths;
+	for (size_t i = 0; i < lines.size();) {
+		if (Trim(lines[i]) == kBlockBegin) {
+			size_t end = i + 1;
+			while (end < lines.size() && Trim(lines[end]) != kBlockEnd)
+				++end;
+			if (end == lines.size()) {
+				output.insert(output.end(), lines.begin() + i, lines.end());
+				break;
+			}
+
+			SectionData block = ParseBlock(lines, i, end);
+			std::wstring asset_path;
+			std::vector<AssetHashObservation> current_hashes;
+			if (!ResolveObservedPath(
+					block,
+					observations,
+					legacy_hash_identities,
+					ambiguous_hashes,
+					&asset_path,
+					&current_hashes)) {
+				if (NeedsPathSectionCanonicalization(block)) {
+					if (remove_unverified_stream_hashes || block.hashes.empty()) {
+						AppendPathBlock(
+							&output,
+							block,
+							block.identity_value,
+							game_version);
+					} else {
+						AppendPathBlockWithUnverifiedHashes(
+							&output,
+							block,
+							block.identity_value,
+							game_version,
+							block.hashes);
+					}
+				} else if (block.identity_alias) {
+					if (block.hashes.empty()) {
+						AppendIdentitySection(&output, block);
+					} else {
+						AppendGeneratedBlock(
+							&output,
+							block,
+							block.hashes,
+							block.mip_multiplicities,
+							game_version);
+					}
+				} else {
+					output.insert(
+						output.end(),
+						lines.begin() + i,
+						lines.begin() + end + 1);
+				}
+				i = end + 1;
+				continue;
+			}
+
+			std::vector<AssetHashObservation> unverified_hashes;
+			for (const AssetHashObservation& stored : block.hashes) {
+				bool current = std::any_of(
+					current_hashes.begin(),
+					current_hashes.end(),
+					[&stored](const AssetHashObservation& observed) {
+						return observed.hash == stored.hash;
+					});
+				if (!current)
+					unverified_hashes.push_back(stored);
+			}
+			if (remove_unverified_stream_hashes) {
+				AppendPathBlock(&output, block, asset_path, game_version);
+			} else {
+				AppendPathBlockWithUnverifiedHashes(
+					&output,
+					block,
+					asset_path,
+					game_version,
+					unverified_hashes);
+			}
+			i = end + 1;
+			continue;
+		}
+
+		std::wstring section_name;
+		if (!ParseSectionHeader(lines[i], &section_name) ||
+				!StartsWithInsensitive(section_name, L"TextureOverride")) {
+			output.push_back(lines[i++]);
+			continue;
+		}
+
+		size_t end = i + 1;
+		std::wstring next_section;
+		while (end < lines.size() &&
+				!ParseSectionHeader(lines[end], &next_section) &&
+				Trim(lines[end]) != kBlockBegin)
+			++end;
+		SectionData section = ParseSection(lines, i, end);
+
+		if (!section.identity_key.empty()) {
+			std::wstring asset_path;
+			std::vector<AssetHashObservation> current_hashes;
+			if (ResolveObservedPath(
+					section,
+					observations,
+					legacy_hash_identities,
+					ambiguous_hashes,
+					&asset_path,
+					&current_hashes)) {
+				AppendPathBlock(&output, section, asset_path, game_version);
+			} else if (section.identity_alias) {
+				AppendIdentitySection(&output, section);
+			} else {
+				output.insert(
+					output.end(),
+					lines.begin() + i,
+					lines.begin() + end);
+			}
+			i = end;
+			continue;
+		}
+
+		bool converted = false;
+		if (section.hashes.size() == 1 &&
+				ambiguous_hashes.find(section.hashes.front().hash) ==
+					ambiguous_hashes.end()) {
+			const uint32_t hash = section.hashes.front().hash;
+			std::wstring asset_path;
+			auto validated = validated_hash_paths.find(hash);
+			if (validated != validated_hash_paths.end()) {
+				asset_path = validated->second;
+			} else {
+				auto identity = legacy_hash_identities.find(hash);
+				if (identity != legacy_hash_identities.end())
+					asset_path = identity->second.asset_path;
+			}
+			if (!asset_path.empty()) {
+				std::wstring path_key = Lower(asset_path);
+				auto group = legacy_path_groups.find(path_key);
+				if (group != legacy_path_groups.end() && group->second.safe) {
+					if (emitted_legacy_paths.insert(path_key).second) {
+						AppendPathBlock(
+							&output,
+							group->second.source,
+							group->second.asset_path,
+							game_version);
+					}
+					converted = true;
+				}
+			}
+		}
+		if (!converted) {
+			output.insert(
+				output.end(),
+				lines.begin() + i,
+				lines.begin() + end);
+		}
+		i = end;
+	}
+	return JoinLines(output);
+}
+
+std::wstring TransformAssetHashIniDocumentToPaths(
+	const std::wstring& source,
+	const AssetHashObservationMap& observations,
+	const AssetHashPathIdentityMap& legacy_hash_identities,
+	const std::set<uint32_t>& ambiguous_hashes,
+	const std::wstring& game_version)
+{
+	return TransformAssetHashIniDocumentToPathsInternal(
+		source,
+		observations,
+		legacy_hash_identities,
+		ambiguous_hashes,
+		game_version,
+		false);
+}
+
+std::wstring TransformAssetHashIniDocumentToCleanPaths(
+	const std::wstring& source,
+	const AssetHashObservationMap& observations,
+	const AssetHashPathIdentityMap& legacy_hash_identities,
+	const std::set<uint32_t>& ambiguous_hashes,
+	const std::wstring& game_version)
+{
+	return TransformAssetHashIniDocumentToPathsInternal(
+		source,
+		observations,
+		legacy_hash_identities,
+		ambiguous_hashes,
+		game_version,
+		true);
 }

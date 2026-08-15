@@ -29,9 +29,12 @@ match_asset_path = /Game/Example/Textures/T_Example_D.T_Example_D
 this = ResourceExample
 ```
 
-`match_asset_name` and `match_asset_path` are mutually exclusive. Asset
-identity matching also cannot be combined with `hash` or fuzzy texture match
-options in the same section.
+`match_asset_name`, `match_asset_path`, and a Hash or fuzzy fallback may coexist
+in the same section. Matching is ordered Path, then Name, then Hash/fuzzy. The
+first successful identity class wins, so stale Hash values do not block a
+valid Path or Name. The parser cannot prove that independently authored fields
+refer to the same intended resource; that consistency remains the author's
+responsibility.
 
 The short name is the suffix after the last `.` in the full object path. Name
 matching is disabled for the remainder of the process if the same short name
@@ -44,6 +47,16 @@ commands run afterwards. They do not replace a resource merely because the
 game bound it. This allows a shared game texture to use different replacements
 for different objects by gating the TextureOverride with variables such as
 `$object_detected`.
+
+F7-generated Path sections use the Unreal object name as their section-name
+suffix, for example `[TextureOverride_T_Example_D]`; a trailing generic
+`_Texture` base is removed. The runtime
+matcher still uses only `match_asset_path`; the suffix keeps different object
+names distinct and remains stable across Path-to-Hash round trips. Same-named
+assets from different packages still require author-chosen unique section base
+names. Any older generated active-Path block without a name suffix is
+canonicalized on the next F7-mode write, even when no Hash in that block is
+currently valid.
 
 ## Frame analysis
 
@@ -67,12 +80,36 @@ identities are written to `TextureAssetManifest.jsonl`.
 
 ## Streaming hash authoring
 
+TextureOverride authoring also accepts two runtime aliases:
+
+```ini
+[TextureOverrideExample]
+name = T_Example_D
+handling = skip
+
+[TextureOverrideExact]
+path = /Game/Example/T_Example_D.T_Example_D
+this = ResourceExample
+```
+
+`name` and `path` are runtime-equivalent to `match_asset_name` and
+`match_asset_path`; they do not depend on F7. They are recognised only inside
+TextureOverride sections. A section cannot combine an alias with its full
+spelling. Path and Name identities may coexist with each other and with a Hash
+or fuzzy fallback. Any F7 mode expands aliases to the full spelling while
+preserving multiple identities when the output remains identity-based. Alias
+presence schedules this canonicalization even when no matching texture has
+been observed yet.
+
 The optional authoring mode is disabled by default. Configure and press F7 to
 toggle it:
 
 ```ini
 [Hunting]
 toggle_asset_hash_capture = no_modifiers VK_F7
+toggle_aggressive_asset_hash_capture = shift no_ctrl no_alt no_lwin no_rwin VK_F7
+toggle_asset_hash_path_conversion = ctrl no_shift no_alt no_lwin no_rwin VK_F7
+toggle_asset_hash_clean_path_conversion = alt no_shift no_ctrl no_lwin no_rwin VK_F7
 ```
 
 The current state is displayed at the top centre of the screen. All resolved
@@ -82,7 +119,12 @@ matching newly loaded `match_asset_path` or unambiguous `match_asset_name`
 identities into the authoring history. This prevents a mod added after the
 initial texture upload from depending on the resource still being live.
 F7 starts backup mode and writes `.hashcache` files. Shift+F7 starts
-aggressive mode and atomically replaces the original loaded INI. File parsing
+aggressive mode and atomically replaces the original loaded INI. Ctrl+F7
+starts Path conversion mode and atomically replaces validated Hash overrides
+with an active Path override while retaining unverified Hash sections and Mip
+metadata inside the same generated block. Alt+F7
+uses the same validation but removes the entire stored Hash list from each
+validated generated block, leaving only its active Path section. File parsing
 and writes run on a background worker rather than the texture creation path.
 The modes are mutually exclusive. Shift+F7 can switch backup mode directly to
 aggressive mode. Shift+F7 toggles aggressive mode off when it is already
@@ -111,7 +153,7 @@ filename = Texture.dds
 
 ; <asset-hash-stream>
 ; match_asset_name = T_Example_D
-; asset_hash_compiler_version = Ver1.0
+; asset_hash_compiler_version = Ver1.1
 ; game_version = 3.5.13
 ; 2048x2048
 [TextureOverride_Texture_12345678]
@@ -142,9 +184,31 @@ resource version cannot be resolved, the generated metadata uses `unknown`
 rather than a stale hard-coded client version.
 
 `asset_hash_compiler_version` identifies this authoring feature's output
-contract. The current contract is `Ver1.0`. It is advanced only after a
+contract. The current contract is `Ver1.1`. It is advanced only after a
 feature/format update has been validated, rather than on every DLL build.
 Older numeric markers remain readable and are migrated when rewritten.
+
+Ctrl+F7 uses the first half of the authoring resolver as a version-update
+diagnostic. A legacy Hash section is converted only when its current Hash maps
+uniquely to a runtime Asset Path. For a previously generated block, the
+commented Path is never copied directly: it is used as a runtime query, and
+the current game must observe a live resource carrying that exact Path. No
+stored Hash needs to match the live resource. Hashes associated with that live
+Path are replaced by one active
+`match_asset_path` section; stored Hashes not validated in the current capture
+remain inside the same `asset-hash-stream` block with their Mip dimensions and
+multiplicity. The Path section omits `match_priority = 0` and keeps the shared
+versioned comment marker. A later F7 or Shift+F7 reuses the residuals as the
+stored Mip group: an incomplete new group is additive, and a complete new
+group replaces the old group.
+
+Alt+F7 is the cleanup counterpart. It requires only exact-Path liveness: the
+runtime must observe a resource carrying the generated block's commented Path.
+No old Hash needs to remain valid and no overlap between old and current Hashes
+is required. It then removes all Hash sections inside the block and writes one
+active Path section. Without current Path evidence the original block remains
+unchanged. Legacy Hash-only sections retain the same unique Hash-to-Path
+requirement as Ctrl+F7.
 
 F7 can also migrate a legacy TextureOverride containing only one active
 `hash`. The hash must be observed as a Texture2D in the current recent cache

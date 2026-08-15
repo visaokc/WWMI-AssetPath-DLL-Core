@@ -28,12 +28,30 @@ typedef std::map<uint32_t, AssetHashPathIdentity>
 std::set<std::wstring> CollectAssetHashIniIdentities(
 	const std::wstring& document);
 
+bool AssetHashIniUsesIdentityAliases(const std::wstring& document);
+
+bool AssetHashIniNeedsCanonicalization(const std::wstring& document);
+
 std::set<uint32_t> CollectAssetHashIniLegacyHashes(
 	const std::wstring& document);
 
 std::wstring TransformAssetHashIniDocument(
 	const std::wstring& source,
 	const std::wstring& previous_output,
+	const AssetHashObservationMap& observations,
+	const AssetHashPathIdentityMap& legacy_hash_identities,
+	const std::set<uint32_t>& ambiguous_hashes,
+	const std::wstring& game_version);
+
+std::wstring TransformAssetHashIniDocumentToPaths(
+	const std::wstring& source,
+	const AssetHashObservationMap& observations,
+	const AssetHashPathIdentityMap& legacy_hash_identities,
+	const std::set<uint32_t>& ambiguous_hashes,
+	const std::wstring& game_version);
+
+std::wstring TransformAssetHashIniDocumentToCleanPaths(
+	const std::wstring& source,
 	const AssetHashObservationMap& observations,
 	const AssetHashPathIdentityMap& legacy_hash_identities,
 	const std::set<uint32_t>& ambiguous_hashes,

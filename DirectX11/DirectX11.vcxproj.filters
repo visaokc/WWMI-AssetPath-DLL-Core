@@ -15,6 +15,7 @@
     <ClCompile Include="..\HLSLDecompiler\DecompileHLSL.cpp" />
     <ClCompile Include="HookedDXGI.cpp" />
     <ClCompile Include="FrameAnalysis.cpp" />
+    <ClCompile Include="DrawDebugStream.cpp" />
     <ClCompile Include="..\D3D_Shaders\Assembler.cpp" />
     <ClCompile Include="..\crc32c-hw-1.0.5\src\crc32c.cpp" />
     <ClCompile Include="CommandList.cpp" />
@@ -64,6 +65,7 @@
     <ClInclude Include="..\shader.h" />
     <ClInclude Include="ShaderRegex.h" />
     <ClInclude Include="FrameAnalysis.h" />
+    <ClInclude Include="DrawDebugStream.h" />
     <ClInclude Include="HackerDXGI.h" />
     <ClInclude Include="profiling.h" />
     <ClInclude Include="lock.h" />

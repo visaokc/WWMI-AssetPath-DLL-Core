@@ -1853,6 +1853,7 @@ void find_texture_overrides_for_resource_by_asset_path(
 	if (asset_path.empty() && asset_name.empty())
 		return;
 
+	size_t matches_before_path = matches->size();
 	if (!asset_path.empty()) {
 		auto path_match = G->mTextureOverridePathMap.find(asset_path);
 		if (path_match != G->mTextureOverridePathMap.end()) {
@@ -1862,6 +1863,8 @@ void find_texture_overrides_for_resource_by_asset_path(
 			}
 		}
 	}
+	if (matches->size() != matches_before_path)
+		return;
 
 	if (asset_name.empty())
 		asset_name = ExtractUnrealAssetName(asset_path);

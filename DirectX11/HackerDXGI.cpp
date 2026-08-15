@@ -66,6 +66,7 @@
 #include "util.h"
 #include "globals.h"
 #include "Hunting.h"
+#include "DrawDebugStream.h"
 #include "Override.h"
 #include "IniHandler.h"
 #include "CommandList.h"
@@ -225,6 +226,7 @@ void HackerSwapChain::RunFrameActions()
 			if (G->DumpUsage)
 				DumpUsage(G->ANALYSIS_PATH);
 			LogOverlayW(LOG_INFO, L"Frame analysis saved to %ls\n", G->ANALYSIS_PATH);
+			FinishDrawDebugCapture();
 		}
 	}
 
@@ -236,6 +238,7 @@ void HackerSwapChain::RunFrameActions()
 	// point, we should consider making an explicit "pre" command list for
 	// that purpose rather than breaking the existing behaviour.
 	bool newEvent = DispatchInputEvents(mHackerDevice);
+	UpdateDrawDebugControl(mHackerDevice);
 
 	CurrentTransition.UpdatePresets(mHackerDevice);
 	CurrentTransition.UpdateTransitions(mHackerDevice);
@@ -277,6 +280,7 @@ void HackerSwapChain::RunFrameActions()
 	// moment, but let's do it last, because logically it makes sense to be
 	// incremented when we call the original present call:
 	G->frame_no++;
+	DrawDebugStreamFrameBoundary();
 
 	// When not hunting most keybindings won't have been registered, but
 	// still skip the below logic that only applies while hunting.
@@ -447,6 +451,7 @@ STDMETHODIMP HackerSwapChain::SetPrivateData(THIS_
 	LogInfo("  returns result = %x\n", hr);
 	return hr;
 }
+
 
 STDMETHODIMP HackerSwapChain::SetPrivateDataInterface(THIS_
 	/* [annotation][in] */
@@ -1305,4 +1310,3 @@ STDMETHODIMP HackerUpscalingSwapChain::ResizeTarget(THIS_
 	LogInfo("  returns result = %x\n", hr);
 	return hr;
 }
-

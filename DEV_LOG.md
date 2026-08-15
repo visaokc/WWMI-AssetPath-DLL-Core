@@ -1,0 +1,288 @@
+# DEV_LOG
+
+## 2026-08-15 - Unique readable Path section names
+
+- Purpose: fix pure-Path texture scrambling caused by Ctrl+F7/Alt+F7 reducing
+  multiple generated overrides to the duplicate section name
+  `[TextureOverride_Texture]`.
+- Output behavior: a generated Path override now uses its Unreal object name as
+  the section suffix and removes the redundant generic `_Texture` base, for
+  example `[TextureOverride_T_R2T1DaniyaMd10011Hair01_D]`. The section name is
+  stable across Path -> Hash -> Path round trips. Same-named assets from
+  different packages still require distinct author-chosen section bases.
+- Repair behavior: generated active-Path blocks using the old generic section
+  name request canonicalization on any F7 mode. The repair needs only the
+  active Path identity and does not require a currently valid stored Hash.
+  Residual Hash sections remain in the same stream and inherit the readable
+  Path section base.
+- Key files: `DirectX11/AssetHashIniDocument.cpp/.h`,
+  `DirectX11/AssetHashCapture.cpp`, `tests/asset_hash_ini_document_tests.cpp`,
+  `README.md`, `docs/asset-path-texture-overrides.md`, and `DEV_LOG.md`.
+- Verification: native `/W4 /WX` tests cover two Paths sharing the former
+  generic base, legacy-block repair, and stable Path -> Hash -> Path naming.
+  Full `Release|x64` rebuild completed with zero errors and produced SHA256
+  `9A206DB7BCB4FCD2E43F5905821CBE754DFB6D3AEB2B652BA53A0DDFB4EEB595`.
+  After confirming the game and launcher were closed, the DLL was installed to
+  `D:\WWMI\d3d11.dll`; source and installed SHA256 hashes match. The previous
+  DLL and live INI were backed up to
+  `D:\WWMI\Backups\AssetPathSectionNames-20260815-070514` before deployment.
+
+## 2026-08-15 - Hunting-gated F11 and agent Draw Debug control
+
+- Purpose: prevent accidental F11 FrameAnalysis/dump capture during normal
+  gameplay and apply the same Hunting-mode safety boundary used by F8.
+- Input behavior: F11 key-down, short heavy capture, and long-press lightweight
+  streaming now require `G->hunting == HUNTING_MODE_ENABLED`. Draw Debug no
+  longer enables or restores Hunting internally. Leaving Hunting mode clears a
+  pending F11 hold and stops an active lightweight stream.
+- Agent behavior: the local-only named pipe now rejects `START`, `ARM`, and
+  `SNAPSHOT` with `ERROR hunting mode required` outside Hunting mode. `STOP`
+  remains available, and `STATUS` exposes `hunting_required` plus
+  `control_allowed`. The render-thread control path repeats the gate and drops
+  stale start/snapshot requests for defense in depth.
+- Audit boundary: the agent pipe provides only fixed capture/filter/mark
+  commands, rejects remote pipe clients, uses bounded filter tables and a
+  bounded telemetry queue, and cannot select arbitrary filesystem paths or
+  execute processes. Heavy payload types remain explicitly controlled by the
+  static `[DrawDebug] options` profile; the live profile dumps CB data but not
+  textures, RT/depth, VB, or IB payloads.
+- Key files: `DirectX11/Hunting.cpp`, `DirectX11/DrawDebugStream.cpp/.h`,
+  `tests/check_draw_debug_hunting_gate.ps1`, `README.md`, and `DEV_LOG.md`.
+- Verification: the dedicated hunting-gate contract test and Asset Hash document
+  tests passed. Full `Release|x64` rebuild completed with zero errors. The
+  installed DLL SHA256 is
+  `F4F6F071C3A12C3E9DC5309E2D68D6080FBC272FAA9271D006B406C339695946`.
+  The previous DLL and live INI were backed up to
+  `D:\WWMI\Backups\DrawDebugHuntingGate-20260815-064113` before deployment to
+  `D:\WWMI\d3d11.dll`.
+
+## 2026-08-15 - Ctrl+F7 residual Mip continuity
+
+- Purpose: keep Ctrl+F7 diagnostic residuals associated with their Path and
+  Mip group so a later F7 or Shift+F7 pass can repair them automatically.
+- Format behavior: unverified Hash sections now remain inside the same
+  versioned `asset-hash-stream` block as the active `match_asset_path` section.
+  Their resolution comments and `asset_hash_mip_multiplicity` marker are
+  preserved instead of emitting the residual sections after the closing
+  marker.
+- Round-trip behavior: when the Path form returns to Hash form, an incomplete
+  observed Mip set is merged additively with residuals. Once the observed set
+  reaches the stored multiplicity, it replaces the complete old Mip group.
+  Alt+F7 can now remove the Path block and all of its residual Hashes together.
+- Key files: `DirectX11/AssetHashIniDocument.cpp`,
+  `tests/asset_hash_ini_document_tests.cpp`, `README.md`,
+  `docs/asset-path-texture-overrides.md`, and `DEV_LOG.md`.
+- Verification: native tests cover residual placement before the stream end,
+  multiplicity preservation, incomplete additive update, complete replacement,
+  and Alt+F7 whole-block cleanup. Full `Release|x64` rebuild completed with zero
+  errors. The installed DLL SHA256 is
+  `8B94DA792C711BF0BF13543453A30554470644B6B42D2392D86833A970651111`.
+  The previous DLL and live INI were backed up to
+  `D:\WWMI\Backups\AssetResidualMipContinuity-20260815-063503` before
+  deployment to `D:\WWMI\d3d11.dll`.
+
+## 2026-08-15 - Alt+F7 validated Path cleanup
+
+- Purpose: add a cleanup counterpart to Ctrl+F7 for authors who have finished
+  version-update diagnosis and want to remove the complete stored Hash list
+  from a generated block.
+- Runtime behavior: `Alt+F7` enters `PATH CLEANUP`. Ordinary Hash-only sections
+  retain the unique current Hash-to-Path conversion requirement. A generated
+  `asset-hash-stream` block still uses its commented Path for exact runtime
+  liveness confirmation. Once a resource carrying that Path is observed, the
+  whole stored Hash list is removed and one active `match_asset_path` section
+  remains. No stored Hash match or old/new Hash overlap is required. A
+  generated block without current Path evidence is left unchanged.
+- Boundary: Ctrl+F7 remains the diagnostic mode and preserves unverified Hashes;
+  Alt+F7 deliberately removes them after Path validation. Both write the loaded
+  INI through atomic replacement, omit `match_priority = 0` from the Path
+  section, and retain the versioned `asset-hash-stream` marker.
+- Key files: `DirectX11/AssetHashCapture.cpp/.h`,
+  `DirectX11/AssetHashIniDocument.cpp/.h`, `DirectX11/Hunting.cpp`,
+  `Dependencies/d3dx.ini`, `README.md`,
+  `docs/asset-path-texture-overrides.md`, and
+  `tests/asset_hash_ini_document_tests.cpp`.
+- Verification: native document tests passed both the no-evidence no-op and
+  whole-block removal with zero overlap between stored and current Hashes. Full
+  `Release|x64` rebuild completed
+  with zero errors. The installed DLL SHA256 is
+  `1F5497FB160AD6612F22AA50AD962BED7992DE6FC6D5E11343151EDE1860B4BA`.
+  The DLL and live `d3dx.ini` were backed up to
+  `D:\WWMI\Backups\AssetPathCleanup-20260815-062834` before deployment; the
+  live Alt+F7 binding was then added to `D:\WWMI\d3dx.ini`.
+
+## 2026-08-15 - Runtime `path` and `name` identity aliases
+
+- Purpose: make Asset Path TextureOverrides practical to hand-author without
+  requiring the long `match_asset_path` and `match_asset_name` field names.
+- Runtime behavior: inside TextureOverride sections, `path` is equivalent to
+  `match_asset_path` and `name` is equivalent to `match_asset_name`, including
+  ordinary command bodies such as `handling = skip`. The aliases are registered
+  as known TextureOverride keys, so they work without enabling any F7 mode.
+- Validation boundary: short and full spellings of the same identity cannot be
+  combined, and `name` must remain a bare Unreal object name. Path, Name, and
+  Hash/fuzzy fallback identities may coexist in one section. Runtime resolution
+  is ordered Path, then Name, then Hash/fuzzy; authors remain responsible for
+  making independently written fields describe the same intended resource.
+- Authoring behavior: the F7 document parser canonicalizes both aliases to the
+  full field names. Starting any F7 mode schedules canonicalization when an
+  alias is present even if no matching resource has been observed. Multiple
+  Path/Name identities are preserved and canonicalized when output remains
+  identity-based. Alias detection is scoped to TextureOverride sections and
+  ignores unrelated `name` fields elsewhere in an INI.
+- Key files: `DirectX11/IniHandler.cpp`,
+  `DirectX11/AssetHashIniDocument.cpp/.h`,
+  `DirectX11/AssetHashCapture.cpp`, `DirectX11/ResourceHash.cpp`, `README.md`,
+  `docs/asset-path-texture-overrides.md`, and
+  `tests/asset_hash_ini_document_tests.cpp`.
+- Verification: dedicated `/W4 /WX` document tests passed alias recognition,
+  canonical identity keys, no-observation normalization, body preservation,
+  and non-TextureOverride exclusion. Full `Release|x64` rebuild completed with
+  zero errors. The installed DLL SHA256 is
+  `89C011B85534D44F90D1AF8F1F626DA150B40C53281EA91313BC5D4A99FAB67D`;
+  it was deployed to `D:\WWMI\d3d11.dll` after backing up the previous DLL and
+  live INI to
+  `D:\WWMI\Backups\AssetIdentityFallback-20260815-061917`.
+
+## 2026-08-15 - Runtime-validated Ctrl+F7 Path conversion
+
+- Purpose: add a game-version update diagnostic that converts currently valid
+  Hash overrides back to one active Asset Path matcher while leaving
+  unverified Hashes visible for author review.
+- Key files: `DirectX11/AssetHashCapture.cpp/.h`,
+  `DirectX11/AssetHashIniDocument.cpp/.h`, `DirectX11/Hunting.cpp`,
+  `Dependencies/d3dx.ini`, `README.md`,
+  `docs/asset-path-texture-overrides.md`, and
+  `tests/asset_hash_ini_document_tests.cpp`.
+- Input and write boundary: `Ctrl+F7` enters `PATH CONVERSION`; it uses the
+  aggressive mode's temporary-file atomic replacement for the loaded INI.
+  Starting from OFF resets the capture session, while switching directly from
+  Backup or Aggressive preserves current observations.
+- Conversion policy: ordinary Hash-only sections require a unique current
+  Hash-to-Path resolution. Previously generated blocks do not trust their
+  commented identity: that exact Path must be observed alive in the current
+  runtime, without requiring any stored Hash match. Current Hashes associated
+  with the live Path collapse into one active `match_asset_path` section;
+  unverified Hashes remain inside the same generated block and are not silently
+  deleted.
+- Round-trip and format policy: Path and streamed-Hash forms both use the
+  `asset-hash-stream` marker with `asset_hash_compiler_version = Ver1.1`.
+  Active Path output omits `match_priority = 0`; a later F7 or Shift+F7 can
+  consume the marked Path block without copying the active identity into a
+  generated Hash section body.
+- UX boundary: a residual Hash means it was not validated in the current
+  capture. It is a strong stale-Hash candidate only after the author has
+  exercised all relevant scenes, LODs, Mips, graphics settings, and variants.
+- Verification: the dedicated `/W4 /WX` native transform suite passed legacy
+  Hash conversion, marker output, Path-to-current-Hash validation, residual
+  preservation, `match_priority = 0` removal, and
+  Path-to-Hash round-trip. Full `Release|x64` rebuild completed with zero
+  errors; SHA256
+  `E542AF4848BCF1DD4DD90601E5F15C0D8310B7177DB85D48E06DD70467C6BF77`.
+- Installation: after confirming the game and XXMI Launcher were not running,
+  installed the verified DLL to `D:\WWMI\d3d11.dll` and added only the
+  `toggle_asset_hash_path_conversion` binding to the existing `d3dx.ini`.
+  Backup: `D:\WWMI\Backups\AssetHashPathConversion-20260815-054617`.
+
+## 2026-08-02 - Session-scoped mip hash replacement and multiplicity markers
+
+- Purpose: stop treating every observed streaming hash as permanent additive
+  history while preserving genuine same-mip multi-hash resource states.
+- Key files: `DirectX11/AssetHashCapture.cpp`,
+  `DirectX11/AssetHashIniDocument.cpp`, `README.md`, and
+  `tests/asset_hash_ini_document_tests.cpp`.
+- Capture boundary: each OFF-to-F7 or OFF-to-Shift+F7 transition clears the
+  in-memory observation set and starts a new session. A direct Backup-to-
+  Aggressive switch keeps the current session.
+- Replacement policy: an unmarked mip is replaced by the hashes observed at
+  the same dimensions in the current session. Observing multiple hashes at one
+  mip emits `; asset_hash_mip_multiplicity = N`. Later sessions replace that
+  mip only after observing at least `N` hashes together; an incomplete capture
+  remains additive until a complete capture can replace the accumulated set.
+  Mips absent from the session remain unchanged.
+- Safety boundary: ambiguous cross-Asset-Path observations are removed before
+  replacement decisions, so an unsafe new hash cannot delete a stored safe
+  hash. Generated blocks now identify the compiler as `Ver1.1`.
+- Verification: the dedicated native `/W4 /WX` transform suite passed Backup,
+  Aggressive, single-hash replacement, multi-hash discovery, incomplete and
+  complete updates, multiplicity expansion, unknown-resolution round-tripping,
+  unmarked-history cleanup, ambiguity handling, and idempotence. Full
+  `Release|x64` rebuild completed with zero errors; SHA256
+  `94081CF26D7FAEE2F8EC601729524668A2100ED5D8DC26B7CE7230C651B8D6DC`.
+- Installation: after confirming no game or Launcher process was running,
+  installed the verified DLL to `D:\WWMI\d3d11.dll`. Backup:
+  `D:\WWMI\Backups\AssetHashMipMultiplicity-20260802-172743`. No process was
+  started or stopped, and `d3dx.ini` was not modified.
+
+## 2026-08-02 - Register DrawDebug as a known INI section
+
+- Fixed the in-game `Unknown section type - [DrawDebug]` overlay by registering
+  `DrawDebug` in the native INI section whitelist. The configuration and Agent
+  stream were already functional; this was a parser diagnostics omission.
+- Final `Release|x64` build completed with zero errors; SHA256
+  `603B9A4A2AB4ABFDBC2CCAA917A3C65F9F6AA5121C9A7DC1931FF595991C8BCA`.
+- After confirming the game and Launcher were closed, installed the corrected
+  DLL to `D:\WWMI\d3d11.dll`. Backup:
+  `D:\WWMI\Backups\DrawDebugSectionFix-20260802-082657`.
+
+## 2026-08-02 - Continuous Agent stream and targeted automatic capture
+
+- Purpose: cover short-lived visual states without continuously running heavy
+  FrameAnalysis resource dumps.
+- Added `DirectX11/DrawDebugStream.cpp/.h`: bounded non-blocking draw queue,
+  asynchronous JSONL writer, local-only `\\.\pipe\wwmi-draw-debug` control,
+  status/drop counters, markers, and targeted draw filters.
+- Input behavior: short `F11` press retains the one-frame heavy snapshot; holding
+  for `long_press_ms` starts the lightweight stream and releasing stops it.
+- Agent behavior: `START`, `STOP`, `SNAPSHOT`, `STATUS`, `MARK`, and targeted
+  `FILTER DRAW`/`ARM` commands. Render-thread D3D11 work is never performed by
+  the pipe thread.
+- Targeted Daniya workflow: `tools/wwmi_draw_debug_client.py arm
+  D:\WWMI\Mods\Daniya7\mod.ini` extracts component index-count/first-index
+  signatures, records direct matches plus learned VS/PS-related draws, and queues
+  one automatic heavy snapshot on first detection.
+- Performance boundary: continuous records contain compact draw arguments,
+  shader hashes, and IB/VB0 hashes only. Full CB/resource payloads remain in the
+  bounded heavy snapshot. Queue contention/overflow drops telemetry and reports
+  a counter instead of blocking rendering.
+- Verification: dedicated native smoke passed for the writer, JSONL record
+  count, named-pipe status, sequential command reconnect, targeted filter,
+  bounded non-match exclusion, and automatic snapshot request. The final
+  `Release|x64` build completed with zero errors; SHA256
+  `A7232A8DC867AC2FFD2D5B51F028B701A264B61BC0CE60C905A07CAA2D735977`.
+- Installation: after confirming the game and Launcher were closed, installed
+  the verified DLL to `D:\WWMI\d3d11.dll` and surgically added
+  `long_press_ms`/`max_queue_records` to the existing enabled `[DrawDebug]`
+  section. Backup: `D:\WWMI\Backups\DrawDebugStream-20260802-081955`.
+
+## 2026-08-02 - Configurable bounded Draw Debug capture
+
+- Purpose: add a reusable runtime diagnostic path for whole-frame character,
+  effect, parallax, shadow, depth, and motion-vector draw investigation without
+  repeatedly patching the DLL for new resource types.
+- Key files: `DirectX11/Hunting.cpp`, `DirectX11/Hunting.h`,
+  `DirectX11/HackerDXGI.cpp`, `Dependencies/d3dx.ini`, and `README.md`.
+- Behavior: `[DrawDebug] enabled = true` prepares FrameAnalysis in
+  soft-disabled hunting mode. The configurable `toggle` key starts one bounded
+  complete-frame capture and automatically restores the previous hunting and
+  FrameAnalysis options after Present. A second key press aborts an active
+  capture.
+- Default evidence: full native draw/state log, shader and resource identity,
+  descriptors, Asset Path identity, and deduplicated CB binary/text payloads.
+  Expensive texture/RT/VB/IB payloads remain opt-in through the existing
+  FrameAnalysis option vocabulary.
+- Boundary: D3D11 cannot directly identify a character owner, so the feature
+  captures the complete frame and preserves TextureOverride/command-list
+  evidence for offline correlation instead of filtering out independent effect
+  or parallax draws.
+- Performance: `enabled = false` retains the normal fast context. Enabled but
+  idle uses soft-disabled hunting and only the fixed FrameAnalysisContext
+  overhead; GPU readback and disk output occur only during a bounded capture.
+- Verification: `build-d3d11.ps1` completed successfully for `Release|x64`;
+  output `x64/Release/d3d11.dll` SHA256
+  `C7B11A2C7C8332302CF7D0363C87498E6DECF1A759E446561D6419AAA7DD77FC`.
+- Installation: copied the verified build to `D:\WWMI\d3d11.dll` and appended
+  an enabled `[DrawDebug]` section to the existing `D:\WWMI\d3dx.ini` without
+  replacing unrelated configuration. The previous DLL and INI were backed up
+  under `D:\WWMI\Backups\DrawDebug-20260802-080351`. No game or Launcher
+  process was started or stopped.

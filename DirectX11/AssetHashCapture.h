@@ -9,6 +9,12 @@ void ToggleAssetHashCapture(HackerDevice *device, void *private_data);
 void ToggleAggressiveAssetHashCapture(
 	HackerDevice *device,
 	void *private_data);
+void ToggleAssetHashPathConversion(
+	HackerDevice *device,
+	void *private_data);
+void ToggleAssetHashCleanPathConversion(
+	HackerDevice *device,
+	void *private_data);
 void RefreshAssetHashCaptureSources();
 void ObserveAssetHashForAuthoring(
 	uintptr_t resource_address,

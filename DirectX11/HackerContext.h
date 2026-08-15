@@ -229,6 +229,10 @@ public:
 
 	void SetHackerDevice(HackerDevice *pDevice);
 	HackerDevice* GetHackerDevice();
+	uint32_t GetCurrentIndexBufferHash() const { return mCurrentIndexBuffer; }
+	uint32_t GetCurrentVertexBufferHash(UINT slot) const {
+		return slot < D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT ? mCurrentVertexBuffers[slot] : 0;
+	}
 	void Bind3DMigotoResources();
 	void InitIniParams();
 	ID3D11DeviceContext1* GetPossiblyHookedOrigContext1();

@@ -21,6 +21,16 @@
 #include "ShaderRegex.h"
 #include "AssetPathTextureIdentity.h"
 #include "AssetHashCapture.h"
+#include "DrawDebugStream.h"
+
+static bool draw_debug_enabled = false;
+static bool draw_debug_active = false;
+static FrameAnalysisOptions draw_debug_options = FrameAnalysisOptions::INVALID;
+static FrameAnalysisOptions draw_debug_previous_options = FrameAnalysisOptions::INVALID;
+static bool draw_debug_key_held = false;
+static bool draw_debug_light_active = false;
+static ULONGLONG draw_debug_key_down_tick = 0;
+static unsigned draw_debug_long_press_ms = 1000;
 
 // bo3b: For this routine, we have a lot of warnings in x64, from converting a size_t result into the needed
 //  DWORD type for the Write calls.  These are writing 256 byte strings, so there is never a chance that it 
@@ -1218,6 +1228,19 @@ static void _AnalyseFrameStop()
 		LeaveCriticalSection(&G->mCriticalSection);
 	}
 	LogOverlayW(LOG_INFO, L"Frame analysis saved to %ls\n", G->ANALYSIS_PATH);
+	FinishDrawDebugCapture();
+}
+
+void FinishDrawDebugCapture()
+{
+	if (!draw_debug_active)
+		return;
+
+	G->def_analyse_options = draw_debug_previous_options;
+	SetAssetPathFrameAnalysisEnabled(
+		!!(G->def_analyse_options & FrameAnalysisOptions::ASSET_PATH));
+	draw_debug_active = false;
+	LogOverlay(LOG_INFO, "Draw Debug: OFF\n");
 }
 
 static void AnalyseFrame(HackerDevice *device, void *private_data)
@@ -1287,6 +1310,113 @@ static void AnalyseFrameStop(HackerDevice *device, void *private_data)
 				G->analyse_frame_no - 1);
 		_AnalyseFrameStop();
 	}
+}
+
+static void StartHeavyDrawDebug(HackerDevice *device)
+{
+	FrameAnalysisContext *factx = NULL;
+
+	if (!draw_debug_enabled || G->hunting != HUNTING_MODE_ENABLED)
+		return;
+
+	if (G->analyse_frame) {
+		device->GetHackerContext()->FrameAnalysisLog("----- Draw Debug aborted -----\n");
+		_AnalyseFrameStop();
+		return;
+	}
+
+	if (FAILED(device->GetHackerContext()->QueryInterface(
+			IID_FrameAnalysisContext, (void**)&factx))) {
+		LogOverlay(LOG_DIRE,
+			"Draw Debug context is missing: restart the game after enabling [DrawDebug]\n");
+		return;
+	}
+	factx->Release();
+
+	draw_debug_previous_options = G->def_analyse_options;
+	draw_debug_active = true;
+	G->def_analyse_options = draw_debug_options;
+	SetAssetPathFrameAnalysisEnabled(
+		!!(G->def_analyse_options & FrameAnalysisOptions::ASSET_PATH));
+
+	AnalyseFrame(device, NULL);
+	if (!G->analyse_frame) {
+		FinishDrawDebugCapture();
+		return;
+	}
+
+	LogOverlay(LOG_NOTICE, "Draw Debug: capturing one complete frame\n");
+}
+
+static void StartLightDrawDebug()
+{
+	if (draw_debug_light_active ||
+			G->hunting != HUNTING_MODE_ENABLED)
+		return;
+	draw_debug_light_active = true;
+	StartDrawDebugStream();
+	LogOverlay(LOG_NOTICE, "Draw Debug Stream: ON\n");
+}
+
+static void StopLightDrawDebug()
+{
+	if (!draw_debug_light_active)
+		return;
+	StopDrawDebugStream();
+	draw_debug_light_active = false;
+	LogOverlay(LOG_INFO, "Draw Debug Stream: OFF\n");
+}
+
+static void DrawDebugKeyDown(HackerDevice *device, void *private_data)
+{
+	if (!draw_debug_enabled || draw_debug_key_held ||
+			G->hunting != HUNTING_MODE_ENABLED)
+		return;
+	draw_debug_key_held = true;
+	draw_debug_key_down_tick = GetTickCount64();
+}
+
+static void DrawDebugKeyUp(HackerDevice *device, void *private_data)
+{
+	if (!draw_debug_key_held)
+		return;
+	draw_debug_key_held = false;
+	if (G->hunting != HUNTING_MODE_ENABLED) {
+		if (draw_debug_light_active)
+			StopLightDrawDebug();
+		return;
+	}
+	if (draw_debug_light_active) {
+		StopLightDrawDebug();
+		return;
+	}
+	StartHeavyDrawDebug(device);
+}
+
+void UpdateDrawDebugControl(HackerDevice *device)
+{
+	const bool hunting_enabled =
+		G->hunting == HUNTING_MODE_ENABLED;
+	SetDrawDebugControlAllowed(draw_debug_enabled && hunting_enabled);
+	if (!draw_debug_enabled)
+		return;
+	if (ConsumeDrawDebugStopRequest())
+		StopLightDrawDebug();
+	if (!hunting_enabled) {
+		draw_debug_key_held = false;
+		if (draw_debug_light_active)
+			StopLightDrawDebug();
+		ConsumeDrawDebugStartRequest();
+		ConsumeDrawDebugSnapshotRequest();
+		return;
+	}
+	if (draw_debug_key_held && !draw_debug_light_active &&
+		GetTickCount64() - draw_debug_key_down_tick >= draw_debug_long_press_ms)
+		StartLightDrawDebug();
+	if (ConsumeDrawDebugStartRequest())
+		StartLightDrawDebug();
+	if (ConsumeDrawDebugSnapshotRequest() && !G->analyse_frame)
+		StartHeavyDrawDebug(device);
 }
 
 static void AnalysePerf(HackerDevice *device, void *private_data)
@@ -1957,6 +2087,29 @@ void ParseHuntingSection()
 	LogInfo("[Hunting]\n");
 	G->hunting = GetIniInt(L"Hunting", L"hunting", 0, NULL);
 
+	LogInfo("[DrawDebug]\n");
+	draw_debug_enabled = GetIniBool(L"DrawDebug", L"enabled", false, NULL);
+	draw_debug_long_press_ms = GetIniInt(L"DrawDebug", L"long_press_ms", 1000, NULL);
+	ConfigureDrawDebugStream(draw_debug_enabled,
+		GetIniInt(L"DrawDebug", L"max_queue_records", 65536, NULL));
+	if (GetIniStringAndLog(L"DrawDebug", L"options", 0, buf, MAX_PATH)) {
+		draw_debug_options = parse_enum_option_string<wchar_t *, FrameAnalysisOptions>
+			(FrameAnalysisOptionNames, buf, NULL);
+	} else {
+		draw_debug_options = (FrameAnalysisOptions)(
+			(int)FrameAnalysisOptions::DUMP_CB |
+			(int)FrameAnalysisOptions::FMT_BUF_BIN |
+			(int)FrameAnalysisOptions::FMT_BUF_TXT |
+			(int)FrameAnalysisOptions::FMT_DESC |
+			(int)FrameAnalysisOptions::DEFRD_CTX_DELAY |
+			(int)FrameAnalysisOptions::SHARE_DEDUPED |
+			(int)FrameAnalysisOptions::ASSET_PATH);
+	}
+	if (draw_debug_enabled && G->hunting == HUNTING_MODE_DISABLED)
+		G->hunting = HUNTING_MODE_SOFT_DISABLED;
+	RegisterIniKeyBinding(L"DrawDebug", L"toggle", DrawDebugKeyDown, DrawDebugKeyUp,
+		noRepeat, NULL);
+
 	// Number of frames a IB/VB buffer hash can remain in the overlay tracking
 	// cache without being encountered again before it is purged.
 	// If >= 0, stale hashes are removed by PurgeStaleVisitedBufferHashes() once per
@@ -1975,6 +2128,8 @@ void ParseHuntingSection()
 	G->config_reloadable = RegisterIniKeyBinding(L"Hunting", L"wipe_user_config", FlagConfigReload, NULL, noRepeat, (void*)true);
 	RegisterIniKeyBinding(L"Hunting", L"toggle_asset_hash_capture", ToggleAssetHashCapture, NULL, noRepeat, NULL);
 	RegisterIniKeyBinding(L"Hunting", L"toggle_aggressive_asset_hash_capture", ToggleAggressiveAssetHashCapture, NULL, noRepeat, NULL);
+	RegisterIniKeyBinding(L"Hunting", L"toggle_asset_hash_path_conversion", ToggleAssetHashPathConversion, NULL, noRepeat, NULL);
+	RegisterIniKeyBinding(L"Hunting", L"toggle_asset_hash_clean_path_conversion", ToggleAssetHashCleanPathConversion, NULL, noRepeat, NULL);
 
 	// We're interested in performance measurements even in release mode
 	// (possibly even especially in release mode), particularly if we want
