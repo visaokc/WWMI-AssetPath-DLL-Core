@@ -19,32 +19,29 @@ automation.
 The root commit contains only the upstream files needed by the `DirectX11`
 project and its direct build dependencies.
 
-## Current release: v1.0.1
+## Current release: v1.0.2
 
-v1.0.1 adds these authoring and debug features:
+v1.0.2 fixes generated section naming and release compatibility:
 
-- **Mip-aware F7 updates:** refreshes texture Hashes after a game update without
-  deleting incomplete multi-Hash Mip groups.
-- **Ctrl+F7 Path conversion:** converts valid Hash overrides to readable Path
-  overrides and leaves unmatched Hashes visible for troubleshooting.
-- **Alt+F7 Path cleanup:** removes stored Hashes after confirming that the Path
-  is still valid, leaving a clean Path-only override.
-- **Short `path` and `name` fields:** makes Asset Path overrides easier to write;
-  generated Path section names are also shorter and easier to identify.
-- **Safer Draw Debug:** F11 and local agent capture commands now work only while
-  Hunting mode is enabled, reducing accidental dumps during normal gameplay.
+- **Consistent section names:** Path mode always writes
+  `[TextureOverride_<name>]`; Hash mode always writes
+  `[TextureOverride_Texture_<hash>]`, regardless of the author's original name.
+- **Restored Hash priority:** generated Hash sections automatically receive
+  `match_priority = 0` when no priority was explicitly provided.
+- **UTF-8 release INI:** fixes the Launcher decode error caused by one invalid
+  Windows-1252 byte in the previous GitHub package.
 
 Release checksums:
 
 ```text
 d3d11.dll
-9A206DB7BCB4FCD2E43F5905821CBE754DFB6D3AEB2B652BA53A0DDFB4EEB595
+2F782BE0823495428746F1F6203EC5C23A0FCA4CFA2156F94C3E13408D7FF56B
 
 d3dx.ini
-14C5F24A4D9A0963002C33EC405CD78D5A16047F7AD7DE2643A80457B66E4E1F
+ABB1B523F65507D59F6DDFA17AD732BEFF15D4492E8E10DFD5A2846EF4338E0C
 
-WWMI-AssetPath-DLL-v1.0.1.zip
-7637FAF78B8978B9AC3A49B0163FB7FCED60F7872733FDE39C1BFADD49A37496
+WWMI-AssetPath-DLL-v1.0.2.zip
+6B283E53EFB887180775E996CE1955270E884F990D7247BB259B2789A131DF25
 ```
 
 ## Download
@@ -245,16 +242,15 @@ obsolete"; an unloaded LOD or Mip can also leave a residual Hash. On a later
 F7 or Shift+F7 pass, residuals participate in the same Mip group: incomplete
 captures remain additive, while a complete new group replaces the old group.
 
-Generated Path sections receive the Unreal object name as their section-name
-suffix, for example `[TextureOverride_T_Example_D]`. The generic `_Texture`
-part is removed. The name suffix is part
-of the INI section identity, not a matcher. It prevents different object names
-that originally shared a generic base such as `TextureOverride_Texture` from
-collapsing into one duplicate section and remains stable across Path -> Hash ->
-Path round trips. Authors should use full Path identities directly when their
-mod contains same-named assets from different packages. An older generated
-active-Path block without a name suffix is repaired the next time an F7 mode
-writes the INI.
+Generated section names never inherit an author's custom suffix. Path mode
+clears everything after `TextureOverride_` and writes the Unreal object name,
+for example `[TextureOverride_T_Example_D]`. Hash mode writes
+`[TextureOverride_Texture_<hash>]` and adds `match_priority = 0` when the source
+body has no explicit priority. This keeps Path -> Hash -> Path output
+predictable even when the input used an unusual custom name. The section name
+is not a matcher; resources with the same object name in different packages
+still need separate handling because their canonical Path section names are
+identical.
 
 #### Path cleanup mode
 
@@ -293,16 +289,14 @@ Hash-to-Path resolution before conversion.
 
 ## 中文使用说明
 
-### v1.0.1 更新简报
+### v1.0.2 更新简报
 
-- **按 Mip 更新 Hash：**F7 / Shift+F7 可在游戏更新后刷新贴图 Hash，同时避免误删尚未
-  收集完整的多 Hash Mip。
-- **Ctrl+F7 转换 Path：**把有效 Hash 转成易读的 Path 写法，并留下未匹配 Hash 供作者排错。
-- **Alt+F7 清理 Hash：**确认 Path 仍然有效后，删除旧 Hash，只保留纯 Path 写法。
-- **新增 `path` / `name` 简写：**让 Asset Path 覆盖更容易手写，生成的 Path section 名也
-  更短、更容易辨认。
-- **Draw Debug 防误触：**F11 与本地 agent 捕获命令只有在 Hunting 模式下才会生效，避免
-  正常游戏时意外 dump。
+- **统一 section 名：**Path 模式固定写成 `[TextureOverride_<name>]`，Hash 模式固定写成
+  `[TextureOverride_Texture_<hash>]`，不再继承作者原本的自定义命名。
+- **补回 Hash 优先级：**生成 Hash section 时，如果原本没有 priority，会自动补上
+  `match_priority = 0`。
+- **修复 GitHub 包编码：**发布用 `d3dx.ini` 已改为 UTF-8 no BOM，解决部分用户安装后
+  Launcher 报 `utf-8 codec can't decode byte 0x92` 的问题。
 
 ### 安装
 
@@ -371,12 +365,13 @@ Path 转换调试：按 `Ctrl+F7` 后遍历所有相关场景、距离、LOD、�
 `F7` 或 `Shift+F7` 转回 Hash 时，未收齐新 Hash 就增量保留，收齐后按 Mip
 整组覆盖旧 Hash。
 
-生成的 Path section 名直接使用 Unreal object name 作为后缀，例如
-`[TextureOverride_T_R2T1DaniyaMd10011Hair01_D]`，并去掉原本冗余的 `_Texture`。
-该后缀只用于保证 INI section 名更容易区分，不参与资源匹配；Path -> Hash ->
-Path 往返会保留同一 name 后缀。如果同一 mod 存在不同 package 下完全同名的资产，
-仍需要作者为它们保留不同的 section base name。旧版生成且没有 name 后缀的
-active Path 块，会在下一次任意 F7 模式写入时自动规范化修复。
+生成的 section 名不再继承作者自定义后缀。Path 模式会清空 `TextureOverride_`
+之后的文字，只写 Unreal object name，例如
+`[TextureOverride_T_R2T1DaniyaMd10011Hair01_D]`；Hash 模式统一写成
+`[TextureOverride_Texture_<hash>]`，并在原 body 没有 priority 时补上
+`match_priority = 0`。因此无论输入如何自定义命名，Path -> Hash -> Path 输出都
+保持统一。section 名不参与资源匹配；不同 package 下完全同名的 object 仍会得到
+相同的 Path section 名，需要作者单独处理。
 
 残留 Hash 的准确含义是“本次捕获未验证”，不是无条件证明它已经过时；如果
 对应 LOD/Mip 没有实际加载，它同样会残留。完整遍历状态后仍稳定残留的 Hash

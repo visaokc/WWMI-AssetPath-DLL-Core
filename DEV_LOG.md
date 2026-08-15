@@ -1,5 +1,34 @@
 # DEV_LOG
 
+## 2026-08-15 - v1.0.2 canonical naming and UTF-8 release fix
+
+- Purpose: make every generated TextureOverride name independent of an
+  author's custom section suffix and fix the Launcher UTF-8 decode failure in
+  the v1.0.1 GitHub package.
+- Naming behavior: Path output now always uses
+  `[TextureOverride_<object-name>]`; Hash output always uses
+  `[TextureOverride_Texture_<hash>]`. Both conversions discard all prior text
+  after the TextureOverride prefix. Generated Hash bodies add
+  `match_priority = 0` when no active priority is already present.
+- Encoding diagnosis: the repository and v1.0.1 ZIP `d3dx.ini` both contained
+  one CP1252 smart-apostrophe byte `0x92` at byte offset 34589, exactly matching
+  the Launcher error reported by affected users. The release template now uses
+  strict UTF-8 without BOM, and a dedicated regression test rejects future
+  invalid UTF-8 or BOM output.
+- Key files: `DirectX11/AssetHashIniDocument.cpp`,
+  `tests/asset_hash_ini_document_tests.cpp`,
+  `tests/check_release_ini_utf8.ps1`, `Dependencies/d3dx.ini`, `README.md`,
+  `docs/asset-path-texture-overrides.md`, and `DEV_LOG.md`.
+- Verification: Asset Hash document tests, release INI UTF-8 validation, and
+  Draw Debug Hunting-gate tests passed. Full `Release|x64` rebuild completed
+  with zero errors. The installed DLL matches SHA256
+  `2F782BE0823495428746F1F6203EC5C23A0FCA4CFA2156F94C3E13408D7FF56B`;
+  the previous live DLL/INI are backed up at
+  `D:\WWMI\Backups\CanonicalAssetSections-20260815-074843`.
+- Package: `WWMI-AssetPath-DLL-v1.0.2.zip` contains only `d3d11.dll` and the
+  corrected `d3dx.ini`. ZIP SHA256:
+  `6B283E53EFB887180775E996CE1955270E884F990D7247BB259B2789A131DF25`.
+
 ## 2026-08-15 - v1.0.1 release
 
 - Purpose: publish the complete authoring/debug update accumulated since the

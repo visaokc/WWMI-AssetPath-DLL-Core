@@ -48,15 +48,14 @@ game bound it. This allows a shared game texture to use different replacements
 for different objects by gating the TextureOverride with variables such as
 `$object_detected`.
 
-F7-generated Path sections use the Unreal object name as their section-name
-suffix, for example `[TextureOverride_T_Example_D]`; a trailing generic
-`_Texture` base is removed. The runtime
-matcher still uses only `match_asset_path`; the suffix keeps different object
-names distinct and remains stable across Path-to-Hash round trips. Same-named
-assets from different packages still require author-chosen unique section base
-names. Any older generated active-Path block without a name suffix is
-canonicalized on the next F7-mode write, even when no Hash in that block is
-currently valid.
+Generated section names discard every author-defined suffix after
+`TextureOverride_`. Path output uses the Unreal object name, for example
+`[TextureOverride_T_Example_D]`. Hash output uses
+`[TextureOverride_Texture_<hash>]` and adds `match_priority = 0` when the source
+body has no explicit priority. The runtime matcher still uses the identity
+fields, not the section name. Same-named assets from different packages produce
+the same canonical Path section name and therefore require separate author
+handling.
 
 ## Frame analysis
 

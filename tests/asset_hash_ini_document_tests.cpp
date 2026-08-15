@@ -563,18 +563,18 @@ void TestShortIdentityAliasesCanonicalize()
 		"name outside TextureOverride must not become an asset identity alias");
 }
 
-void TestPathSectionsUseStableUniqueNames()
+void TestGeneratedSectionsUseCanonicalNames()
 {
 	const std::wstring source =
 		L"; <asset-hash-stream>\r\n"
 		L"; match_asset_path = /Game/Test/A.A\r\n"
-		L"[TextureOverride_Texture_11111111]\r\n"
+		L"[TextureOverrideTextureAuthorLabelA]\r\n"
 		L"hash = 11111111\r\n"
 		L"this = ResourceA\r\n"
 		L"; </asset-hash-stream>\r\n"
 		L"; <asset-hash-stream>\r\n"
 		L"; match_asset_path = /Game/Test/B.B\r\n"
-		L"[TextureOverride_Texture_22222222]\r\n"
+		L"[TextureOverride_AnotherAuthorLabelB]\r\n"
 		L"hash = 22222222\r\n"
 		L"this = ResourceB\r\n"
 		L"; </asset-hash-stream>\r\n";
@@ -596,7 +596,10 @@ void TestPathSectionsUseStableUniqueNames()
 	Require(
 		paths.find(L"[TextureOverride_A]") != std::wstring::npos &&
 			paths.find(L"[TextureOverride_B]") != std::wstring::npos,
-		"generated path section names must expose the Unreal object name");
+		"Path mode must replace every author suffix with the object name");
+	Require(
+		paths.find(L"AuthorLabel") == std::wstring::npos,
+		"Path mode must not retain custom author section labels");
 	size_t first = paths.find(L"[TextureOverride_");
 	size_t first_end = paths.find(L']', first);
 	size_t second = paths.find(
@@ -618,6 +621,19 @@ void TestPathSectionsUseStableUniqueNames()
 		{},
 		{},
 		L"test-version");
+	Require(
+		hashes.find(L"[TextureOverride_Texture_11111111]") !=
+			std::wstring::npos &&
+			hashes.find(L"[TextureOverride_Texture_22222222]") !=
+			std::wstring::npos,
+		"Hash mode must replace every suffix with Texture_<hash>");
+	Require(
+		Count(hashes, L"match_priority = 0") == 2,
+		"Hash mode must add match_priority = 0 to every generated section");
+	Require(
+		hashes.find(L"[TextureOverride_A_11111111]") == std::wstring::npos &&
+			hashes.find(L"[TextureOverride_B_22222222]") == std::wstring::npos,
+		"Hash mode must not retain Path or author suffixes");
 	const std::wstring round_trip = TransformAssetHashIniDocumentToCleanPaths(
 		hashes,
 		observations,
@@ -668,7 +684,7 @@ int main()
 	TestCtrlResidualMipHashesStayInStreamAndRepair();
 	TestMarkedPathCanReturnToGeneratedHashes();
 	TestShortIdentityAliasesCanonicalize();
-	TestPathSectionsUseStableUniqueNames();
+	TestGeneratedSectionsUseCanonicalNames();
 	std::cout << "asset_hash_ini_document_tests: PASS\n";
 	return 0;
 }

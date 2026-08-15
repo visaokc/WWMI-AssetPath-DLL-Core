@@ -542,7 +542,6 @@ void RemoveAmbiguousHashes(
 void TrimBodyBlankLines(std::vector<std::wstring> *body);
 
 std::wstring PathSectionName(
-	const std::wstring& source_name,
 	const std::wstring& asset_path);
 
 void AppendIdentitySection(
@@ -552,9 +551,7 @@ void AppendIdentitySection(
 	std::wstring section_name = section.section_name;
 	if (section.generated_block &&
 			section.identity_name == L"match_asset_path") {
-		section_name = PathSectionName(
-			section.section_name,
-			section.identity_value);
+		section_name = PathSectionName(section.identity_value);
 	}
 	output->push_back(L"[" + section_name + L"]");
 	output->push_back(
@@ -593,25 +590,17 @@ void RemoveZeroMatchPriority(std::vector<std::wstring> *body)
 		body->end());
 }
 
-std::wstring BaseSectionName(std::wstring section_name)
+void EnsureHashMatchPriority(std::vector<std::wstring> *body)
 {
-	std::wstring lowered = Lower(section_name);
-	size_t legacy_suffix = lowered.find(L"_assethash_");
-	if (legacy_suffix != std::wstring::npos) {
-		section_name.resize(legacy_suffix);
-		return section_name;
+	for (const std::wstring& line : *body) {
+		std::wstring key;
+		std::wstring value;
+		bool commented = false;
+		if (ParseAssignment(line, &key, &value, &commented) &&
+				!commented && key == L"match_priority")
+			return;
 	}
-
-	size_t separator = section_name.rfind(L'_');
-	if (separator == std::wstring::npos ||
-			section_name.size() - separator - 1 != 8)
-		return section_name;
-	for (size_t i = separator + 1; i < section_name.size(); ++i) {
-		if (!iswxdigit(section_name[i]))
-			return section_name;
-	}
-	section_name.resize(separator);
-	return section_name;
+	body->insert(body->begin(), L"match_priority = 0");
 }
 
 std::wstring AssetPathSectionName(const std::wstring& asset_path)
@@ -629,39 +618,21 @@ std::wstring AssetPathSectionName(const std::wstring& asset_path)
 }
 
 std::wstring PathSectionName(
-	const std::wstring& source_name,
 	const std::wstring& asset_path)
 {
-	std::wstring base_name = BaseSectionName(source_name);
-	const std::wstring generic_texture_suffix = L"_texture";
-	if (base_name.size() >= generic_texture_suffix.size() &&
-			Lower(base_name.substr(
-				base_name.size() - generic_texture_suffix.size())) ==
-				generic_texture_suffix) {
-		base_name.resize(base_name.size() - generic_texture_suffix.size());
-	}
-	std::wstring suffix = L"_" + AssetPathSectionName(asset_path);
-	if (base_name.size() >= suffix.size() &&
-			Lower(base_name.substr(base_name.size() - suffix.size())) ==
-				Lower(suffix))
-		return base_name;
-	return base_name + suffix;
+	return L"TextureOverride_" + AssetPathSectionName(asset_path);
 }
 
 bool NeedsPathSectionCanonicalization(const SectionData& section)
 {
 	return section.generated_block && section.active_path_identity &&
 		section.identity_name == L"match_asset_path" &&
-		section.section_name != PathSectionName(
-			section.section_name,
-			section.identity_value);
+		section.section_name != PathSectionName(section.identity_value);
 }
 
-std::wstring GeneratedSectionName(
-	const std::wstring& source_name,
-	const std::wstring& hash_text)
+std::wstring GeneratedSectionName(const std::wstring& hash_text)
 {
-	return BaseSectionName(source_name) + L"_" + hash_text;
+	return L"TextureOverride_Texture_" + hash_text;
 }
 
 void AppendPathBlockStart(
@@ -681,7 +652,7 @@ void AppendPathBlockStart(
 	output->push_back(L"; asset_hash_compiler_version = Ver1.1");
 	output->push_back(L"; game_version = " + game_version);
 	output->push_back(
-		L"[" + PathSectionName(source.section_name, asset_path) + L"]");
+		L"[" + PathSectionName(asset_path) + L"]");
 	output->push_back(L"match_asset_path = " + asset_path);
 	for (const auto& identity : source.additional_identities) {
 		output->push_back(identity.first + L" = " + identity.second);
@@ -708,12 +679,12 @@ void AppendPathBlock(
 void AppendUnverifiedHashSections(
 	std::vector<std::wstring> *output,
 	const SectionData& source,
-	const std::wstring& asset_path,
 	std::vector<AssetHashObservation> hashes)
 {
 	NormalizeHashes(&hashes);
 	std::vector<std::wstring> body = source.body;
 	TrimBodyBlankLines(&body);
+	EnsureHashMatchPriority(&body);
 	for (size_t i = 0; i < hashes.size(); ++i) {
 		const AssetHashObservation& observation = hashes[i];
 		output->push_back(L"");
@@ -738,9 +709,7 @@ void AppendUnverifiedHashSections(
 		}
 		wchar_t hash_text[9];
 		swprintf(hash_text, 9, L"%08x", observation.hash);
-		output->push_back(
-			L"[" + PathSectionName(source.section_name, asset_path) +
-			L"_" + hash_text + L"]");
+		output->push_back(L"[" + GeneratedSectionName(hash_text) + L"]");
 		output->push_back(L"hash = " + std::wstring(hash_text));
 		output->insert(output->end(), body.begin(), body.end());
 	}
@@ -757,7 +726,6 @@ void AppendPathBlockWithUnverifiedHashes(
 	AppendUnverifiedHashSections(
 		output,
 		source,
-		asset_path,
 		unverified_hashes);
 	AppendPathBlockEnd(output);
 }
@@ -812,6 +780,7 @@ void AppendGeneratedBlock(
 	NormalizeHashes(&hashes);
 	std::vector<std::wstring> body = source.body;
 	TrimBodyBlankLines(&body);
+	EnsureHashMatchPriority(&body);
 	output->push_back(kBlockBegin);
 	output->push_back(
 		L"; " + source.identity_name + L" = " + source.identity_value);
@@ -847,9 +816,7 @@ void AppendGeneratedBlock(
 		}
 		wchar_t hash_text[9];
 		swprintf(hash_text, 9, L"%08x", observation.hash);
-		std::wstring section_name = GeneratedSectionName(
-			source.section_name,
-			hash_text);
+		std::wstring section_name = GeneratedSectionName(hash_text);
 		output->push_back(L"[" + section_name + L"]");
 		output->push_back(L"hash = " + std::wstring(hash_text));
 		output->insert(
