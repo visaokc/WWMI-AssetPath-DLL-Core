@@ -1,5 +1,31 @@
 # DEV_LOG
 
+## 2026-08-20 - Already-current VB ShapeKey anchor
+
+- Runtime proof: after restarting capture with YangYang as the controlled model,
+  agent status reported target VB `efd45ce3`, native vertex count `65173`, and
+  the complete exact ShapeKey pair in both stages: offsets `1a646636` at UAV0
+  with `1564152 = 65173 * 24` bytes, and scale `6fe81411` at UAV1 with
+  `260692 = 65173 * 4` bytes. The INI nevertheless remained byte-identical.
+- Root cause: ShapeKey association depended on a newly constructed VB family
+  replacement. YangYang's VB0/Component values had already been updated by the
+  earlier partial write, and the later target observations included additional
+  draws, so no second old-to-new VB replacement was constructed. The complete
+  ShapeKey pair therefore had no family anchor.
+- Fix: when the target-only observation set has exactly one VB hash and one
+  native vertex count matching an INI primary host hash, that already-current
+  VB now anchors ShapeKey association directly. No repeat VB text replacement
+  is required. The atomic incomplete-pair gate remains active.
+- Verification: a regression test covers an already-current VB whose observed
+  draw signature cannot create a replacement mapping, and requires both
+  ShapeKey hashes to update through the direct target anchor. All native and
+  static contract tests passed; `Release|x64` rebuilt with 212 pre-existing
+  warnings and zero errors. DLL SHA256 is
+  `5AB7A68CAAAEA0168E61BCE1404D81A7885DFFEA193664233FFB75921597A5DE`.
+- Installation boundary: the game remains open and the live YangYang INI still
+  contains the obsolete ShapeKey hashes. Installation and runtime acceptance
+  remain pending after game exit.
+
 ## 2026-08-20 - ShapeKey capture diagnostics and atomic repair gate
 
 - Runtime correction: the first UAV-role build was installed and the following

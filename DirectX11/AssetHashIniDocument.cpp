@@ -2056,6 +2056,14 @@ std::wstring TransformVbHashIniDocument(
 	}
 
 	std::map<uint32_t, uint32_t> shape_replacements;
+	std::set<uint32_t> observed_target_hashes;
+	std::set<uint32_t> observed_target_vertex_counts;
+	for (const VbHashObservation& observation : observations) {
+		if (observation.hash)
+			observed_target_hashes.insert(observation.hash);
+		if (observation.vertex_count)
+			observed_target_vertex_counts.insert(observation.vertex_count);
+	}
 	bool has_target_shape_roots = false;
 	bool target_shape_roots_resolved = true;
 	for (const auto& roots : shape_roots) {
@@ -2068,8 +2076,16 @@ std::wstring TransformVbHashIniDocument(
 			host_hash = *primary->second.begin();
 		}
 		auto family = replacements.find({roots.first.first, host_hash});
-		if (family == replacements.end())
+		uint64_t vertex_count = 0;
+		if (family != replacements.end()) {
+			vertex_count = family->second.vertex_count;
+		} else if (observed_target_hashes.size() == 1 &&
+				observed_target_vertex_counts.size() == 1 &&
+				*observed_target_hashes.begin() == host_hash) {
+			vertex_count = *observed_target_vertex_counts.begin();
+		} else {
 			continue;
+		}
 		has_target_shape_roots = true;
 		size_t offsets_roots = 0;
 		size_t scale_roots = 0;
@@ -2093,7 +2109,6 @@ std::wstring TransformVbHashIniDocument(
 		uint32_t current_scale = 0;
 		size_t offsets_matches = 0;
 		size_t scale_matches = 0;
-		const uint64_t vertex_count = family->second.vertex_count;
 		for (const auto& resource : shape_resources) {
 			if (resource.second.ambiguous_width ||
 					!resource.second.stages)

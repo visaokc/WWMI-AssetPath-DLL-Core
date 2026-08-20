@@ -455,6 +455,8 @@ draw 之前已经执行完的 ShapeKey Dispatch 丢失，也避免其它同尺�
 本轮会保留整个 INI，不会先写 VB0/Component 再把模型置于半修复状态。agent
 `STATUS` 的 `asset_capture` 字段可直接查看目标 VB、原生顶点数以及最近的
 ShapeKey filter/slot 观测。
+若 VB0 已经是当前 Hash，但 ShapeKey 仍是旧 Hash，唯一选中的当前 VB 与原生
+vertex count 会直接作为 ShapeKey family 锚点，不要求 VB0 再发生一次文本替换。
 
 第一次 F7 中先捕获的 VB 观测会保留到同一轮旧贴图 Hash 解析出可信 Path，
 生成 Path 与修复 VB 之间不再要求额外重载。
