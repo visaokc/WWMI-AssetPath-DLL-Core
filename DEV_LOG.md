@@ -16,8 +16,10 @@
   offsets, and scale are now one atomic repair unit. Missing or ambiguous
   offsets/scale returns the original document rather than committing a partial
   VB/Component update that collapses the model.
-- Recovery: the live YangYang INI was manually returned to the known-good
-  ShapeKey hashes and backed up at
+- Test-state correction: a temporary manual recovery was reverted at the
+  user's direction. The live YangYang INI again contains the obsolete ShapeKey
+  hashes and remains the runtime input that F7 itself must repair. The known-good
+  manual result is retained only as rollback evidence under
   `D:\WWMI\Backups\ManualRecovery-20260820-111100`.
 - Verification: native document, Draw Debug gate, unrestricted agent control,
   release INI contract, and `git diff --check` passed. `Release|x64` rebuilt
