@@ -22,9 +22,13 @@
   static contract tests passed; `Release|x64` rebuilt with 212 pre-existing
   warnings and zero errors. DLL SHA256 is
   `5AB7A68CAAAEA0168E61BCE1404D81A7885DFFEA193664233FFB75921597A5DE`.
-- Installation boundary: the game remains open and the live YangYang INI still
-  contains the obsolete ShapeKey hashes. Installation and runtime acceptance
-  remain pending after game exit.
+- Installation: after confirming the game process was absent, the rebuilt DLL
+  was copied to `D:\WWMI\d3d11.dll`; its SHA256 matches the verified build.
+  The previous DLL, `d3dx.ini`, and the obsolete-ShapeKey YangYang test INI
+  were backed up under
+  `D:\WWMI\Backups\AlreadyCurrentVbShapeKey-20260820-114647`. Both INI files
+  remained byte-identical during installation. F7 runtime acceptance remains
+  pending.
 
 ## 2026-08-20 - ShapeKey capture diagnostics and atomic repair gate
 
