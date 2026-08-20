@@ -22,12 +22,19 @@
   that host. Exactly one native vertex count must remain within that host;
   unrelated pre-lock character observations no longer block it. No repeat VB
   text replacement is required. The atomic incomplete-pair gate remains active.
+- No-switch completion: selecting the current model INI is itself a state
+  transition that can make already-captured VB/ShapeKey evidence writable. It
+  now marks the snapshot dirty and explicitly wakes the writer after releasing
+  the capture lock, rather than depending on a later character switch or a new
+  unique observation to generate another wakeup.
 - Verification: the regression now includes an unrelated pre-lock VB hash and
   vertex count while requiring both ShapeKey hashes to update through the
-  already-current host. All native and static contract tests passed;
+  already-current host. A static contract also requires target selection to
+  dirty and wake the writer outside the capture lock. All native and static
+  contract tests passed;
   `Release|x64` rebuilt with 212 pre-existing warnings and zero errors. DLL
   SHA256 is
-  `935258DE0DA62D29A5DC39964C9C77E99D39C91E22C247A4C205783DC28C0B2D`.
+  `1DE61412FC4A6EBB7AFDF8A27FC37BF5D9C6F56343E3E2820AB25AF8EACD9873`.
 - Installation: after confirming the game process was absent, the rebuilt DLL
   was copied to `D:\WWMI\d3d11.dll`; its SHA256 matches the verified build.
   The previous DLL, `d3dx.ini`, and the obsolete-ShapeKey YangYang test INI
@@ -37,7 +44,9 @@
   the pre-lock observation rejection above. After the next game exit, the
   corrected DLL was installed and verified; the replaced DLL plus unchanged
   INIs were backed up under
-  `D:\WWMI\Backups\HostFilteredShapeKey-20260820-131133`. F7 runtime acceptance
+  `D:\WWMI\Backups\HostFilteredShapeKey-20260820-131133`. The no-switch writer
+  wakeup build was then installed with another unchanged-INI backup at
+  `D:\WWMI\Backups\ImmediateTargetWake-20260820-134637`. F7 runtime acceptance
   remains pending.
 
 ## 2026-08-20 - ShapeKey capture diagnostics and atomic repair gate

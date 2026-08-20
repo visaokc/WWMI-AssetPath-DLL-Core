@@ -1263,6 +1263,7 @@ bool AssetHashCaptureNeedsVbObservation(
 {
 	std::wstring activated_source;
 	uint32_t activated_vertex_count = 0;
+	bool signal_writer = false;
 	AcquireSRWLockExclusive(&capture_lock);
 	if (capture_mode != CaptureMode::Off && target_source_file.empty()) {
 		if (vertex_count)
@@ -1306,6 +1307,8 @@ bool AssetHashCaptureNeedsVbObservation(
 			target_vertex_count = model_vertex_counts[hash];
 			target_profile_loaded = false;
 			vb_probe_keys.clear();
+			capture_dirty = true;
+			signal_writer = true;
 			activated_source = target_source_file;
 			activated_vertex_count = target_vertex_count;
 		}
@@ -1322,6 +1325,8 @@ bool AssetHashCaptureNeedsVbObservation(
 			activated_source.c_str(),
 			hash,
 			activated_vertex_count);
+	if (signal_writer)
+		SignalWriter();
 	return needed;
 }
 
