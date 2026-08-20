@@ -5,9 +5,11 @@ $hunting = Get-Content (Join-Path $root 'DirectX11\Hunting.cpp') -Raw
 $stream = Get-Content (Join-Path $root 'DirectX11\DrawDebugStream.cpp') -Raw
 
 $requiredHuntingContracts = @(
-    'if (!draw_debug_enabled || G->hunting != HUNTING_MODE_ENABLED)',
-    'G->hunting != HUNTING_MODE_ENABLED)',
-    'SetDrawDebugControlAllowed(draw_debug_enabled && hunting_enabled);'
+    'if (!agent_control && G->hunting != HUNTING_MODE_ENABLED)',
+    '(!agent_control && G->hunting != HUNTING_MODE_ENABLED)',
+    'AnalyseFrameInternal(device, false);',
+    'StartLightDrawDebug(false);',
+    'StartHeavyDrawDebug(device, false);'
 )
 foreach ($contract in $requiredHuntingContracts) {
     if (-not $hunting.Contains($contract)) {
@@ -15,11 +17,20 @@ foreach ($contract in $requiredHuntingContracts) {
     }
 }
 
-if (([regex]::Matches($stream, 'ERROR hunting mode required')).Count -ne 3) {
-    throw 'START, ARM, and SNAPSHOT must all reject control outside hunting mode.'
+if ($stream.Contains('ERROR hunting mode required')) {
+    throw 'Agent START, ARM, and SNAPSHOT must bypass the human Hunting gate.'
 }
-if (-not $stream.Contains('\"control_allowed\":%s')) {
-    throw 'Draw Debug STATUS must expose the hunting gate state.'
+$requiredAgentContracts = @(
+    'SetDrawDebugControlAllowed(draw_debug_enabled);',
+    'StartLightDrawDebug(true);',
+    'StartHeavyDrawDebug(device, true);',
+    '\"agent_hunting_required\":false',
+    '\"control_allowed\":%s'
+)
+foreach ($contract in $requiredAgentContracts) {
+    if (-not ($hunting.Contains($contract) -or $stream.Contains($contract))) {
+        throw "Missing Hunting-independent agent control contract: $contract"
+    }
 }
 
 $configureBody = [regex]::Match(

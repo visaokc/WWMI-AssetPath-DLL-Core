@@ -1,5 +1,31 @@
 # DEV_LOG
 
+## 2026-08-20 - Hunting-independent agent Draw Debug control
+
+- Purpose: let the local named-pipe agent start continuous, targeted, and
+  heavy Draw Debug captures without enabling Hunting, while preserving the
+  Hunting gate for human F11/F8 input.
+- Behavior: `[DrawDebug]` parsing remains thread-free. The render-thread update
+  lazily starts `\\.\pipe\wwmi-draw-debug` whenever Draw Debug is configured.
+  Agent `START`, `ARM`, and `SNAPSHOT` bypass Hunting; keyboard paths still call
+  the gated implementations, and an agent-owned stream is not stopped merely
+  because Hunting is off.
+- Compatibility boundary: the implementation was added on top of commit
+  `a6d2460` and retains its Path-gated lazy VB0 repair. No checkout, reset, or
+  replacement of the prior Asset Hash/VB0 files was performed.
+- Key files: `DirectX11/DrawDebugStream.cpp`, `DirectX11/Hunting.cpp`,
+  `tests/check_draw_debug_hunting_gate.ps1`, and `README.md`.
+- Verification: the Draw Debug agent/human gate contract and Asset Hash/VB0
+  native tests passed; `git diff --check` passed; `Release|x64` rebuilt with
+  212 pre-existing warnings and zero errors. DLL SHA256:
+  `75563B526427F7618304A1E69A0C6827EBBFA9856BC0A138C91DC6372F0EDF10`.
+- Installation: with WuWa closed, the combined DLL was installed at
+  `D:\WWMI\d3d11.dll`. The previous DLL and unchanged live INI were backed up
+  under `D:\WWMI\Backups\AgentDirectDrawDebug-20260820-001502`.
+- Runtime acceptance: build/static validation is complete; direct agent-pipe
+  capture and live VB0 repair still require a new WuWa run for end-to-end
+  acceptance.
+
 ## 2026-08-19 - Path-gated VB0 repair with lazy observation
 
 - Purpose: add automatic VB0 hash repair to all four F7 capture modes while

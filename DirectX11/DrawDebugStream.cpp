@@ -140,7 +140,7 @@ std::string StatusJson()
 			*p = '/';
 	}
 	sprintf_s(buf,
-		"{\"active\":%s,\"hunting_required\":true,\"control_allowed\":%s,"
+		"{\"active\":%s,\"agent_hunting_required\":false,\"control_allowed\":%s,"
 		"\"frame\":%llu,\"sequence\":%llu,"
 		"\"written\":%llu,\"dropped\":%llu,\"path\":\"%s\"}\n",
 		active.load() ? "true" : "false",
@@ -209,33 +209,21 @@ DWORD WINAPI PipeThreadProc(void *)
 			} else if (!_stricmp(command, "STATUS")) {
 				response = StatusJson();
 			} else if (!_stricmp(command, "START")) {
-				if (!control_allowed.load()) {
-					response = "ERROR hunting mode required\n";
-				} else {
-					targeted.store(false);
-					start_requested.store(true);
-					response = "QUEUED START\n";
-				}
+				targeted.store(false);
+				start_requested.store(true);
+				response = "QUEUED START\n";
 			} else if (!_stricmp(command, "ARM")) {
-				if (!control_allowed.load()) {
-					response = "ERROR hunting mode required\n";
-				} else {
-					targeted.store(true);
-					armed.store(true);
-					learned_shader_count.store(0);
-					start_requested.store(true);
-					response = "QUEUED ARM\n";
-				}
+				targeted.store(true);
+				armed.store(true);
+				learned_shader_count.store(0);
+				start_requested.store(true);
+				response = "QUEUED ARM\n";
 			} else if (!_stricmp(command, "STOP")) {
 				stop_requested.store(true);
 				response = "QUEUED STOP\n";
 			} else if (!_stricmp(command, "SNAPSHOT")) {
-				if (!control_allowed.load()) {
-					response = "ERROR hunting mode required\n";
-				} else {
-					snapshot_requested.store(true);
-					response = "QUEUED SNAPSHOT\n";
-				}
+				snapshot_requested.store(true);
+				response = "QUEUED SNAPSHOT\n";
 			} else if (!_strnicmp(command, "MARK ", 5)) {
 				DrawDebugStreamMark(command + 5);
 				response = "OK MARK\n";

@@ -134,9 +134,11 @@ max_queue_records = 65536
 options = dump_cb buf txt desc deferred_ctx_accurate share_dupes asset_path
 ```
 
-Draw Debug now follows the same safety boundary as F8 Frame Analysis: first
-enable Hunting mode with the configured `toggle_hunting` key (the supplied
-configuration uses `Numpad0`). Outside active Hunting mode, F11 is ignored.
+Human-operated Draw Debug follows the same safety boundary as F8 Frame
+Analysis: first enable Hunting mode with the configured `toggle_hunting` key
+(the supplied configuration uses `Numpad0`). Outside active Hunting mode, F11
+and F8 are ignored. Agent control through the local named pipe is a separate
+channel and does not require Hunting.
 Press and release `F11` in less than one second to capture one complete heavy
 FrameAnalysis frame. Hold `F11` for at least one second to start the lightweight
 continuous draw stream; release it to stop. Heavy output is written to a
@@ -158,22 +160,23 @@ correlated offline without excluding them prematurely.
 
 When `enabled = false`, no FrameAnalysisContext is requested by Draw Debug.
 With `enabled = true`, INI parsing only records the configuration: it does not
-create the pipe or writer threads during game startup. The pipe exists only
-while Hunting is active, and the writer and output file exist only during a
-lightweight capture. GPU readback and disk-write cost remain limited to actual
-captures.
+create the pipe or writer threads during game startup. The render-thread update
+starts the local agent-control pipe lazily after initialization; the writer and
+output file still exist only during a lightweight capture. GPU readback and
+disk-write cost remain limited to actual captures.
 
 ### Agent control and targeted capture
 
-While Draw Debug and Hunting are enabled, the local-only named pipe
+While Draw Debug is enabled, the local-only named pipe
 `\\.\pipe\wwmi-draw-debug` accepts `PING`, `STATUS`, `START`, `STOP`,
 `SNAPSHOT`, `MARK <label>`, `FILTER CLEAR`, `FILTER DRAW <count> <first>`, and
 `ARM`. Pipe commands only queue state changes; D3D11 work remains on the render
 thread. Continuous records use a bounded non-blocking queue and an asynchronous
 JSONL writer. Queue contention or overflow increments `dropped` instead of
-stalling the game. `START`, `ARM`, and `SNAPSHOT` are rejected unless Hunting
-mode is currently enabled; `STATUS` reports `control_allowed`, while `STOP`
-remains available so an existing stream can always be terminated.
+stalling the game. Agent `START`, `ARM`, and `SNAPSHOT` bypass the human Hunting
+gate; `STATUS` reports `agent_hunting_required=false` and `control_allowed`.
+Human F11/F8 handling remains Hunting-gated, and `STOP` remains available so an
+existing stream can always be terminated.
 
 Use the included zero-dependency client:
 

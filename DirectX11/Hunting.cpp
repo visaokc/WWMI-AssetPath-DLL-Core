@@ -29,6 +29,7 @@ static FrameAnalysisOptions draw_debug_options = FrameAnalysisOptions::INVALID;
 static FrameAnalysisOptions draw_debug_previous_options = FrameAnalysisOptions::INVALID;
 static bool draw_debug_key_held = false;
 static bool draw_debug_light_active = false;
+static bool draw_debug_light_agent_control = false;
 static ULONGLONG draw_debug_key_down_tick = 0;
 static unsigned draw_debug_long_press_ms = 1000;
 
@@ -1243,7 +1244,7 @@ void FinishDrawDebugCapture()
 	LogOverlay(LOG_INFO, "Draw Debug: OFF\n");
 }
 
-static void AnalyseFrame(HackerDevice *device, void *private_data)
+static void AnalyseFrameInternal(HackerDevice *device, bool agent_control)
 {
 	FrameAnalysisContext *factx = NULL;
 	wchar_t path[MAX_PATH], subdir[MAX_PATH];
@@ -1264,7 +1265,7 @@ static void AnalyseFrame(HackerDevice *device, void *private_data)
 		return _AnalyseFrameStop();
 	}
 
-	if (G->hunting != HUNTING_MODE_ENABLED)
+	if (!agent_control && G->hunting != HUNTING_MODE_ENABLED)
 		return;
 
 	time(&ltime);
@@ -1294,6 +1295,11 @@ static void AnalyseFrame(HackerDevice *device, void *private_data)
 	G->analyse_frame = true;
 }
 
+static void AnalyseFrame(HackerDevice *device, void *private_data)
+{
+	AnalyseFrameInternal(device, false);
+}
+
 static void AnalyseFrameStop(HackerDevice *device, void *private_data)
 {
 	// One of three places we can stop the frame analysis - the other is in
@@ -1312,11 +1318,12 @@ static void AnalyseFrameStop(HackerDevice *device, void *private_data)
 	}
 }
 
-static void StartHeavyDrawDebug(HackerDevice *device)
+static void StartHeavyDrawDebug(HackerDevice *device, bool agent_control)
 {
 	FrameAnalysisContext *factx = NULL;
 
-	if (!draw_debug_enabled || G->hunting != HUNTING_MODE_ENABLED)
+	if (!draw_debug_enabled ||
+			(!agent_control && G->hunting != HUNTING_MODE_ENABLED))
 		return;
 
 	if (G->analyse_frame) {
@@ -1339,7 +1346,7 @@ static void StartHeavyDrawDebug(HackerDevice *device)
 	SetAssetPathFrameAnalysisEnabled(
 		!!(G->def_analyse_options & FrameAnalysisOptions::ASSET_PATH));
 
-	AnalyseFrame(device, NULL);
+	AnalyseFrameInternal(device, agent_control);
 	if (!G->analyse_frame) {
 		FinishDrawDebugCapture();
 		return;
@@ -1348,12 +1355,13 @@ static void StartHeavyDrawDebug(HackerDevice *device)
 	LogOverlay(LOG_NOTICE, "Draw Debug: capturing one complete frame\n");
 }
 
-static void StartLightDrawDebug()
+static void StartLightDrawDebug(bool agent_control)
 {
 	if (draw_debug_light_active ||
-			G->hunting != HUNTING_MODE_ENABLED)
+			(!agent_control && G->hunting != HUNTING_MODE_ENABLED))
 		return;
 	draw_debug_light_active = true;
+	draw_debug_light_agent_control = agent_control;
 	StartDrawDebugStream();
 	LogOverlay(LOG_NOTICE, "Draw Debug Stream: ON\n");
 }
@@ -1364,6 +1372,7 @@ static void StopLightDrawDebug()
 		return;
 	StopDrawDebugStream();
 	draw_debug_light_active = false;
+	draw_debug_light_agent_control = false;
 	LogOverlay(LOG_INFO, "Draw Debug Stream: OFF\n");
 }
 
@@ -1390,33 +1399,31 @@ static void DrawDebugKeyUp(HackerDevice *device, void *private_data)
 		StopLightDrawDebug();
 		return;
 	}
-	StartHeavyDrawDebug(device);
+	StartHeavyDrawDebug(device, false);
 }
 
 void UpdateDrawDebugControl(HackerDevice *device)
 {
 	const bool hunting_enabled =
 		G->hunting == HUNTING_MODE_ENABLED;
-	SetDrawDebugControlAllowed(draw_debug_enabled && hunting_enabled);
+	SetDrawDebugControlAllowed(draw_debug_enabled);
 	if (!draw_debug_enabled)
 		return;
 	if (ConsumeDrawDebugStopRequest())
 		StopLightDrawDebug();
+	if (ConsumeDrawDebugStartRequest())
+		StartLightDrawDebug(true);
+	if (ConsumeDrawDebugSnapshotRequest() && !G->analyse_frame)
+		StartHeavyDrawDebug(device, true);
 	if (!hunting_enabled) {
 		draw_debug_key_held = false;
-		if (draw_debug_light_active)
+		if (draw_debug_light_active && !draw_debug_light_agent_control)
 			StopLightDrawDebug();
-		ConsumeDrawDebugStartRequest();
-		ConsumeDrawDebugSnapshotRequest();
 		return;
 	}
 	if (draw_debug_key_held && !draw_debug_light_active &&
 		GetTickCount64() - draw_debug_key_down_tick >= draw_debug_long_press_ms)
-		StartLightDrawDebug();
-	if (ConsumeDrawDebugStartRequest())
-		StartLightDrawDebug();
-	if (ConsumeDrawDebugSnapshotRequest() && !G->analyse_frame)
-		StartHeavyDrawDebug(device);
+		StartLightDrawDebug(false);
 }
 
 static void AnalysePerf(HackerDevice *device, void *private_data)
