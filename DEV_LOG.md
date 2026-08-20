@@ -28,10 +28,11 @@
   release INI contract, and `git diff --check` passed. `Release|x64` rebuilt
   with 212 pre-existing warnings and zero errors; DLL SHA256 is
   `F414F008F2374D2AF2893AB9F57DEF807EAB8B7F03ACDB2BA724C9ADBDCD16A6`.
-- Installation boundary: WuWa remained open, so this DLL was not copied over
-  the currently loaded live DLL. The damaged live Mod was inspected but not
-  manually repaired; installation and user-driven F7 acceptance remain
-  pending after game exit.
+- Installation: after WuWa exited, the rebuilt DLL was copied to
+  `D:\WWMI\d3d11.dll` and its SHA256 was verified. The previous DLL,
+  `d3dx.ini`, and the damaged YangYang INI were backed up under
+  `D:\WWMI\Backups\FirstFrameShapeKey-20260820-102621`. Installation did not
+  modify either INI; user-driven F7 runtime acceptance remains pending.
 
 ## 2026-08-20 - Native VB identity correction
 
