@@ -24,9 +24,11 @@
   contract, and `git diff --check` passed. `Release|x64` rebuilt with 212
   pre-existing warnings and zero errors; DLL SHA256 is
   `0DF63533F2FA05F20652B8F767D5612111439CB3D3AA80148E4329D5D34AA9A0`.
-- Installation boundary: the game remains open and the manually repaired INI
-  remains untouched. The rebuilt DLL is not installed; runtime acceptance is
-  pending after game exit.
+- Installation: after confirming the game process was absent, the rebuilt DLL
+  was copied to `D:\WWMI\d3d11.dll` and its SHA256 was verified. The previous
+  DLL, `d3dx.ini`, and YangYang INI were backed up under
+  `D:\WWMI\Backups\ShapeKeyUavRole-20260820-110423`; neither INI changed during
+  installation. User-driven runtime acceptance remains pending.
 
 ## 2026-08-20 - First-frame ShapeKey observation retention
 
