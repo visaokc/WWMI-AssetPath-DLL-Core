@@ -26,7 +26,15 @@ void ObserveVbHashForAuthoring(
 	const std::wstring& asset_path,
 	uint32_t hash,
 	uint32_t first_index,
-	uint32_t index_count);
+	uint32_t index_count,
+	uint32_t vertex_count);
+void ObserveShapeKeyHashForAuthoring(
+	uint32_t hash,
+	uint32_t byte_width,
+	uint32_t structure_byte_stride,
+	uint32_t filter_index,
+	uint32_t slot,
+	bool unordered_access);
 void RetireAssetHashForAuthoring(uintptr_t resource_address);
 bool AssetHashCaptureStatusVisible();
 bool AssetHashCaptureEnabled();
@@ -34,4 +42,7 @@ bool AssetHashCaptureNeedsVbObservation(
 	uint32_t hash,
 	uint32_t first_index,
 	uint32_t index_count);
+bool AssetHashCaptureNeedsShapeKeyObservation(
+	uint32_t hash,
+	uint32_t filter_index);
 const wchar_t *AssetHashCaptureStatusText();

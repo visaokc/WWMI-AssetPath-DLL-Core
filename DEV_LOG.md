@@ -21,13 +21,97 @@
 - Isolation: implemented in worktree
   `D:\MOD\BlenderAddonProjects\.worktrees\wwmi-agent-unrestricted-dump` on
   branch `agent/unrestricted-dump`, leaving the concurrent main-worktree DLL
-  changes untouched until their commit is ready to merge.
+  changes untouched until commits `fbe8957` and `5dae25a` were ready. Both were
+  then merged without a source conflict; the only manual merge was preserving
+  both sets of `DEV_LOG.md` entries.
 - Verification: static agent/Hunting contracts, Python syntax/client CLI,
   native Asset Hash document tests, release INI checks, and `git diff --check`
   passed. Final `Release|x64` rebuild completed with 212 pre-existing warnings
   and zero errors. DLL SHA256:
-  `69B2871929EE91C355B78574528CEB39DC87BBABDA37148563A0A36D00E169D6`.
-  Live installation is deferred while WuWa is running.
+  `6AB021DC35D831427BFE6A77E4996E3545A42D3F0EC04FF1086993AAD5A82DE2`.
+- Installation: after WuWa exited, the combined DLL was installed and read
+  back at `D:\WWMI\d3d11.dll` with the same SHA256. The prior DLL and unchanged
+  live INI were backed up under
+  `D:\WWMI\Backups\AgentUnrestrictedDump-20260820-020409`.
+## 2026-08-20 - First-pass Path-to-VB observation retention
+
+- Symptom: `D:\WWMI\Mods\YangYang\mod.ini` gained valid generated Path
+  blocks in Aggressive F7 mode, but VB0, Component ranges, and ShapeKey Hashes
+  all remained unchanged.
+- Root cause: `ObserveVbHashForAuthoring()` accepted only Paths already present
+  in `watched_identities` when F7 started. On a legacy-Hash-only INI, the draw
+  probe ran before the writer generated its Path, rejected the VB observation,
+  and then deduplicated that draw signature for the rest of the session.
+- Fix: retain bounded Path/VB draw observations during the active F7 session.
+  `TransformVbHashIniDocument()` still consumes only Paths present in the
+  transformed target document, so unrelated runtime Paths cannot create an INI
+  replacement. The existing 65,536-observation cap, per-signature probe
+  deduplication, ambiguity rejection, and capture-off atomic fast path remain.
+- Regression: added a first-pass integration test that starts from a legacy
+  texture Hash section, generates a Path, and repairs the linked VB family in
+  the same transform pass. Native document, Draw Debug gate, and release INI
+  contract tests pass. `Release|x64` rebuilt with 212 pre-existing warnings and
+  zero errors; DLL SHA256 is
+  `8950D153D5A533D1EC64C8C29B47BDB2BE15BAF92EB90664433150DC79AC2992`.
+- Real fixture check: the YangYang document exposes one linked VB family
+  (`15fb50a9`), and an offline replay with the reported current Component and
+  ShapeKey observations updated all requested fields. The prior assumption
+  that `if $object_detected` was not recognized was disproved; the existing
+  variable scanner already treats it as the consumer of
+  `$object_detected = 1`.
+- Files: `DirectX11/AssetHashCapture.cpp`,
+  `tests/asset_hash_ini_document_tests.cpp`, and `README.md`.
+- Installation: after WuWa exited, the rebuilt DLL was installed at
+  `D:\WWMI\d3d11.dll` and read back with the same SHA256. The previous DLL,
+  live `d3dx.ini`, and current YangYang `mod.ini` were backed up under
+  `D:\WWMI\Backups\FirstPassVbRepair-20260820-014819`; neither INI was edited
+  during installation. Runtime acceptance remains pending until YangYang is
+  tested again.
+
+## 2026-08-20 - Path-gated ShapeKey and Component range repair
+
+- Purpose: extend all four F7 authoring modes beyond VB0 replacement so a
+  trusted Path-linked host can also repair changed `match_first_index`,
+  `match_index_count`, ShapeKey offsets Hash, and ShapeKey scale Hash.
+- Component behavior: exact draw-signature matching remains the first route.
+  Changed ranges are accepted only when one current VB0 produces one unique
+  contiguous Component sequence and no same-variable old family has the same
+  structural shape. Hash-unchanged range updates are supported; split, merged,
+  reordered, partial, or multi-candidate families remain unchanged.
+- ShapeKey behavior: the DLL samples bound CS buffers only for WWMI's
+  `3381.3333` loader and `3381.4444` multiplier callbacks. A ShapeKey pair is
+  associated through the resolved Path/VB family and current vertex count;
+  offsets require the unique UAV0 buffer seen at both stages, while scale
+  requires one unique four-byte-per-vertex buffer. Alternate sections whose
+  names carry an eight-digit host VB Hash are associated with that host family.
+  Every active ShapeKey TextureOverride reference to a resolved old Hash is
+  updated without adding INI comments or markers.
+- Performance boundary: capture OFF uses a lock-free atomic flag read. During
+  capture, stored VB0/draw signatures remain the fast path; unknown ranges are
+  probed once, and ShapeKey correlation arms one deduplicated PS/CS resource
+  scan per candidate rather than continuous per-frame scanning.
+- Compatibility boundary: implemented incrementally on top of commits
+  `a6d2460` and `07476f8`; the adjacent Hunting-independent agent Draw Debug
+  changes were retained. No checkout, reset, or wholesale DLL source
+  replacement was performed.
+- Key files: `DirectX11/AssetHashCapture.cpp/.h`,
+  `DirectX11/AssetHashIniDocument.cpp/.h`, `DirectX11/HackerContext.cpp`,
+  `tests/asset_hash_ini_document_tests.cpp`, and `README.md`.
+- Verification: native Asset Hash document tests cover changed ranges,
+  unchanged-VB0 ranges, complete ShapeKey reference replacement, and VB/scale
+  ambiguity rejection; Draw Debug hunting-gate regression passed;
+  `git diff --check` passed. Full `Release|x64` rebuild completed with 212
+  pre-existing warnings and zero errors. DLL SHA256:
+  `68EEB289CC5CF33B96DCE6291E277E612F8AF0517C0C957B728F69694C731D2F`.
+- Installation: with WuWa closed, the combined DLL was installed at
+  `D:\WWMI\d3d11.dll`; the previously installed adjacent-window DLL and live
+  INI were backed up under
+  `D:\WWMI\Backups\ExtendedF7Repair-20260820-010421`. The live `d3dx.ini`
+  remained byte-identical with SHA256
+  `1E14D07F4ECDA067DA018793BD3CC40725D4E45064533BDE9710937ED31AB547`.
+- Runtime acceptance: static/native/build/install validation is complete.
+  Current WuWa ShapeKey slot identity and a real updated Component family still
+  require an in-game F7 pass before this is considered end-to-end accepted.
 
 ## 2026-08-20 - Hunting-independent agent Draw Debug control
 

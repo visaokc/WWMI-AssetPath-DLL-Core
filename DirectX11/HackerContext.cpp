@@ -827,6 +827,19 @@ void HackerContext::BeforeDraw(DrawContext &data)
 				vb0_hash,
 				data.call_info.FirstIndex,
 				data.call_info.IndexCount)) {
+			uint32_t vertex_count = 0;
+			ID3D11Buffer *vb0 = nullptr;
+			UINT stride = 0;
+			UINT offset = 0;
+			mOrigContext1->IAGetVertexBuffers(0, 1, &vb0, &stride, &offset);
+			if (vb0 && stride) {
+				D3D11_BUFFER_DESC desc = {};
+				vb0->GetDesc(&desc);
+				if (desc.ByteWidth > offset)
+					vertex_count = (desc.ByteWidth - offset) / stride;
+			}
+			if (vb0)
+				vb0->Release();
 			ID3D11ShaderResourceView *views[
 				D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
 			mOrigContext1->PSGetShaderResources(
@@ -846,7 +859,8 @@ void HackerContext::BeforeDraw(DrawContext &data)
 						asset_path,
 						vb0_hash,
 						data.call_info.FirstIndex,
-						data.call_info.IndexCount);
+						data.call_info.IndexCount,
+						vertex_count);
 				}
 				if (resource)
 					resource->Release();
@@ -1765,6 +1779,98 @@ STDMETHODIMP_(void) HackerContext::SOSetTargets(THIS_
 
 bool HackerContext::BeforeDispatch(DispatchContext *context)
 {
+	ShaderOverrideMap::iterator capture_shader_override =
+		G->mShaderOverrideMap.end();
+	const bool asset_hash_capture_enabled = AssetHashCaptureEnabled();
+	if (asset_hash_capture_enabled && !G->mShaderOverrideMap.empty())
+		capture_shader_override = lookup_shaderoverride(mCurrentComputeShader);
+
+	uint32_t shape_key_filter = 0;
+	if (capture_shader_override != G->mShaderOverrideMap.end()) {
+		float loader_delta =
+			capture_shader_override->second.filter_index - 3381.3333f;
+		float multiplier_delta =
+			capture_shader_override->second.filter_index - 3381.4444f;
+		if (loader_delta > -0.0002f && loader_delta < 0.0002f)
+			shape_key_filter = 3333;
+		else if (multiplier_delta > -0.0002f && multiplier_delta < 0.0002f)
+			shape_key_filter = 4444;
+	}
+	if (shape_key_filter) {
+		ID3D11UnorderedAccessView *primary_view = nullptr;
+		mOrigContext1->CSGetUnorderedAccessViews(0, 1, &primary_view);
+		uint32_t primary_hash = 0;
+		if (primary_view) {
+			ID3D11Resource *resource = nullptr;
+			primary_view->GetResource(&resource);
+			primary_hash = GetResourceHash(resource);
+			if (resource)
+				resource->Release();
+			primary_view->Release();
+		}
+		if (AssetHashCaptureNeedsShapeKeyObservation(
+				primary_hash, shape_key_filter)) {
+			auto observe_resource = [shape_key_filter](
+					ID3D11Resource *resource,
+					uint32_t slot,
+					bool unordered_access) {
+				if (!resource)
+					return;
+				ID3D11Buffer *buffer = nullptr;
+				if (FAILED(resource->QueryInterface(
+						__uuidof(ID3D11Buffer),
+						reinterpret_cast<void**>(&buffer))))
+					return;
+				D3D11_BUFFER_DESC desc = {};
+				buffer->GetDesc(&desc);
+				ObserveShapeKeyHashForAuthoring(
+					GetResourceHash(resource),
+					desc.ByteWidth,
+					desc.StructureByteStride,
+					shape_key_filter,
+					slot,
+					unordered_access);
+				buffer->Release();
+			};
+			ID3D11ShaderResourceView *srvs[
+				D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
+			mOrigContext1->CSGetShaderResources(
+				0,
+				D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,
+				srvs);
+			for (uint32_t slot = 0;
+					slot < D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;
+					++slot) {
+				if (!srvs[slot])
+					continue;
+				ID3D11Resource *resource = nullptr;
+				srvs[slot]->GetResource(&resource);
+				observe_resource(resource, slot, false);
+				if (resource)
+					resource->Release();
+				srvs[slot]->Release();
+			}
+			ID3D11UnorderedAccessView *uavs[
+				D3D11_PS_CS_UAV_REGISTER_COUNT] = {};
+			mOrigContext1->CSGetUnorderedAccessViews(
+				0,
+				D3D11_PS_CS_UAV_REGISTER_COUNT,
+				uavs);
+			for (uint32_t slot = 0;
+					slot < D3D11_PS_CS_UAV_REGISTER_COUNT;
+					++slot) {
+				if (!uavs[slot])
+					continue;
+				ID3D11Resource *resource = nullptr;
+				uavs[slot]->GetResource(&resource);
+				observe_resource(resource, slot, true);
+				if (resource)
+					resource->Release();
+				uavs[slot]->Release();
+			}
+		}
+	}
+
 	if (G->hunting == HUNTING_MODE_ENABLED) {
 		if (G->DumpUsage)
 			RecordComputeShaderStats();
@@ -1782,16 +1888,15 @@ bool HackerContext::BeforeDispatch(DispatchContext *context)
 
 	// Override settings?
 	if (!G->mShaderOverrideMap.empty()) {
-		ShaderOverrideMap::iterator i;
-
-		i = lookup_shaderoverride(mCurrentComputeShader);
-		if (i != G->mShaderOverrideMap.end()) {
-			context->post_commands = &i->second.post_command_list;
+		ShaderOverrideMap::iterator shader_override =
+			lookup_shaderoverride(mCurrentComputeShader);
+		if (shader_override != G->mShaderOverrideMap.end()) {
+			context->post_commands = &shader_override->second.post_command_list;
 			// XXX: Not using ProcessShaderOverride() as a
 			// lot of it's logic doesn't really apply to
 			// compute shaders. The main thing we care
 			// about is the command list, so just run that:
-			RunCommandList(mHackerDevice, this, &i->second.command_list, &context->call_info, false);
+			RunCommandList(mHackerDevice, this, &shader_override->second.command_list, &context->call_info, false);
 			return !context->call_info.skip;
 		}
 	}

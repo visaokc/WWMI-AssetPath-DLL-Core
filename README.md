@@ -297,6 +297,17 @@ Hash-to-Path resolution before conversion.
   supported.
 - Each transition from OFF to any F7 mode starts a fresh capture session.
   Switching directly between writing modes keeps the same session.
+- Path-linked VB0 families also repair `match_first_index` and
+  `match_index_count` when the current draws form one unique contiguous
+  component sequence. ShapeKey offset and scale hashes are repaired only when
+  the same Path-linked VB family and the WWMI loader/multiplier buffer sizes
+  produce one unique match; ambiguous families remain unchanged.
+- Extended draw and compute probing is session-scoped and deduplicated. With
+  capture OFF, the hot path is one atomic flag read; during capture, known
+  draw signatures avoid resource scans unless ShapeKey correlation is armed.
+- VB observations from a first F7 pass are retained until the same pass
+  resolves legacy texture Hashes into trusted Paths, so Path creation and VB
+  repair do not require an intermediate reload.
 - Only texture states that the game actually loads can be observed. The DLL
   does not force the game to load missing LODs or streamed mips.
 - For a normal mip, a hash observed in the current session replaces older
@@ -418,6 +429,15 @@ DLL 只能记录游戏实际加载过的贴图状态，不能强制游戏加载�
 或流式 Mip；因此需要主动展示对应角色、距离和画面细节。从 OFF 开启一次
 `F7` 或 `Shift+F7` 会建立一个全新的捕获会话；从备份模式直接切换到激进
 模式仍属于同一个会话。
+
+Path 锁定的 VB0 family 若能在当前 draw 中形成唯一连续的 Component 序列，
+会同时修复 `match_first_index` 和 `match_index_count`。ShapeKey offsets/scale
+Hash 只有在同一 Path/VB family 与 WWMI loader/multiplier Buffer 尺寸共同得到
+唯一结果时才更新；多候选保持原值。扩展 draw/compute 探测只在捕获会话中
+按候选执行一次并去重；捕获关闭时热路径只读取一个 atomic flag。
+
+第一次 F7 中先捕获的 VB 观测会保留到同一轮旧贴图 Hash 解析出可信 Path，
+生成 Path 与修复 VB 之间不再要求额外重载。
 
 普通 Mip 在本次会话捕获到新 Hash 后，会覆盖同尺寸的旧 Hash；本次没有
 捕获到的其它 Mip 保持不变。若同一会话在同尺寸下确实捕获到多个不同 Hash，
