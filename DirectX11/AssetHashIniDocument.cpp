@@ -1960,6 +1960,7 @@ std::wstring TransformVbHashIniDocument(
 		uint32_t byte_width = 0;
 		uint32_t stages = 0;
 		bool uav0 = false;
+		bool uav1 = false;
 		bool ambiguous_width = false;
 	};
 	std::map<uint32_t, ShapeKeyResourceState> shape_resources;
@@ -1978,6 +1979,8 @@ std::wstring TransformVbHashIniDocument(
 			resource.stages |= 2;
 		if (observation.unordered_access && observation.slot == 0)
 			resource.uav0 = true;
+		if (observation.unordered_access && observation.slot == 1)
+			resource.uav1 = true;
 	}
 
 	struct ShapeKeyRoot
@@ -2096,7 +2099,9 @@ std::wstring TransformVbHashIniDocument(
 				current_offsets = resource.first;
 				++offsets_matches;
 			}
-			if (resource.second.byte_width == vertex_count * 4) {
+			if (resource.second.uav1 &&
+					resource.second.stages == 3 &&
+					resource.second.byte_width == vertex_count * 4) {
 				current_scale = resource.first;
 				++scale_matches;
 			}

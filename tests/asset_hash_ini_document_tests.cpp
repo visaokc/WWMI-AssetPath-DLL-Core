@@ -830,8 +830,10 @@ void TestVbRangeAndShapeKeyReplacementUsesUniqueStructure()
 	const ShapeKeyHashObservationList shape_observations = {
 		{0x1a646636, 24000, 0, 3333, 0, true},
 		{0x1a646636, 24000, 0, 4444, 0, true},
-		{0x06fe8141, 4000, 0, 3333, 2, false},
-		{0x06fe8141, 4000, 0, 4444, 2, false}};
+		{0x6fe81411, 4000, 0, 3333, 1, true},
+		{0x6fe81411, 4000, 0, 4444, 1, true},
+		{0x12345678, 4000, 0, 3333, 2, false},
+		{0x12345678, 4000, 0, 4444, 2, false}};
 	const std::wstring updated = TransformVbHashIniDocument(
 		source, vb_observations, shape_observations);
 	Require(
@@ -846,7 +848,7 @@ void TestVbRangeAndShapeKeyReplacementUsesUniqueStructure()
 		updated.find(L"hash = 7fe8c94e") == std::wstring::npos,
 		"the offsets hash must update every semantic ShapeKey reference");
 	Require(
-		updated.find(L"hash = 06fe8141") != std::wstring::npos &&
+		updated.find(L"hash = 6fe81411") != std::wstring::npos &&
 		updated.find(L"hash = 81378bbb") == std::wstring::npos,
 		"the uniquely sized ShapeKey scale buffer must update without markers");
 }
@@ -900,14 +902,14 @@ void TestShapeKeyReplacementRejectsAmbiguousBufferSize()
 	const ShapeKeyHashObservationList shape_observations = {
 		{0x1a646636, 24000, 0, 3333, 0, true},
 		{0x1a646636, 24000, 0, 4444, 0, true},
-		{0x06fe8141, 4000, 0, 3333, 2, false},
-		{0x12345678, 4000, 0, 4444, 3, false}};
+		{0x6fe81411, 4000, 0, 3333, 1, true},
+		{0x12345678, 4000, 0, 4444, 1, true}};
 	const std::wstring updated = TransformVbHashIniDocument(
 		source, vb_observations, shape_observations);
 	Require(
 		updated.find(L"hash = 1a646636") != std::wstring::npos &&
 		updated.find(L"hash = 81378bbb") != std::wstring::npos &&
-		updated.find(L"hash = 06fe8141") == std::wstring::npos &&
+		updated.find(L"hash = 6fe81411") == std::wstring::npos &&
 		updated.find(L"hash = 12345678") == std::wstring::npos,
 		"two scale-sized buffers must preserve the old scale hash while offsets remain repairable");
 }

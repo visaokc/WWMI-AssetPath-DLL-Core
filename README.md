@@ -309,8 +309,9 @@ Hash-to-Path resolution before conversion.
   capture OFF, the hot path is one atomic flag read; during capture, known
   VB hashes probe their buffer size only once, and selected-model draw
   signatures avoid repeated resource scans unless ShapeKey correlation is
-  armed. ShapeKey loader/multiplier resources are retained from the start of
-  the session, then size-filtered only after the current model is selected.
+  armed. ShapeKey loader/multiplier capture reads only UAV0 offsets and UAV1
+  scale from the original Dispatch, retains them from the start of the session,
+  then size-filters them only after the current model is selected.
 - VB observations from a first F7 pass are retained until the same pass
   resolves legacy texture Hashes into trusted Paths, so Path creation and VB
   repair do not require an intermediate reload.
@@ -445,8 +446,9 @@ family 至少命中三项，并且最高分来源必须唯一；只有选中的�
 INI 或 family 多候选时保持原值。扩展
 draw/compute 探测只在捕获会话中按候选执行一次并去重；捕获关闭时热路径只
 读取一个 atomic flag，捕获期间每个未知 VB Hash 也只读取一次 Buffer 尺寸。
-ShapeKey loader/multiplier 资源从会话开始即暂存，选定当前模型后才按原生
-vertex count 做尺寸过滤，避免首次 draw 之前已经执行完的 ShapeKey Dispatch 丢失。
+ShapeKey loader/multiplier 只读取原始 Dispatch 的 UAV0 offsets 与 UAV1 scale，
+从会话开始即暂存，选定当前模型后才按原生 vertex count 做尺寸过滤，避免首次
+draw 之前已经执行完的 ShapeKey Dispatch 丢失，也避免其它同尺寸资源制造歧义。
 
 第一次 F7 中先捕获的 VB 观测会保留到同一轮旧贴图 Hash 解析出可信 Path，
 生成 Path 与修复 VB 之间不再要求额外重载。

@@ -1802,16 +1802,15 @@ bool HackerContext::BeforeDispatch(DispatchContext *context)
 			shape_key_filter = 4444;
 	}
 	if (shape_key_filter) {
-		ID3D11UnorderedAccessView *primary_view = nullptr;
-		mOrigContext1->CSGetUnorderedAccessViews(0, 1, &primary_view);
+		ID3D11UnorderedAccessView *shape_views[2] = {};
+		mOrigContext1->CSGetUnorderedAccessViews(0, 2, shape_views);
 		uint32_t primary_hash = 0;
-		if (primary_view) {
+		if (shape_views[0]) {
 			ID3D11Resource *resource = nullptr;
-			primary_view->GetResource(&resource);
+			shape_views[0]->GetResource(&resource);
 			primary_hash = GetResourceHash(resource);
 			if (resource)
 				resource->Release();
-			primary_view->Release();
 		}
 		if (AssetHashCaptureNeedsShapeKeyObservation(
 				primary_hash, shape_key_filter)) {
@@ -1837,42 +1836,19 @@ bool HackerContext::BeforeDispatch(DispatchContext *context)
 					unordered_access);
 				buffer->Release();
 			};
-			ID3D11ShaderResourceView *srvs[
-				D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
-			mOrigContext1->CSGetShaderResources(
-				0,
-				D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,
-				srvs);
-			for (uint32_t slot = 0;
-					slot < D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;
-					++slot) {
-				if (!srvs[slot])
+			for (uint32_t slot = 0; slot < 2; ++slot) {
+				if (!shape_views[slot])
 					continue;
 				ID3D11Resource *resource = nullptr;
-				srvs[slot]->GetResource(&resource);
-				observe_resource(resource, slot, false);
-				if (resource)
-					resource->Release();
-				srvs[slot]->Release();
-			}
-			ID3D11UnorderedAccessView *uavs[
-				D3D11_PS_CS_UAV_REGISTER_COUNT] = {};
-			mOrigContext1->CSGetUnorderedAccessViews(
-				0,
-				D3D11_PS_CS_UAV_REGISTER_COUNT,
-				uavs);
-			for (uint32_t slot = 0;
-					slot < D3D11_PS_CS_UAV_REGISTER_COUNT;
-					++slot) {
-				if (!uavs[slot])
-					continue;
-				ID3D11Resource *resource = nullptr;
-				uavs[slot]->GetResource(&resource);
+				shape_views[slot]->GetResource(&resource);
 				observe_resource(resource, slot, true);
 				if (resource)
 					resource->Release();
-				uavs[slot]->Release();
 			}
+		}
+		for (ID3D11UnorderedAccessView *view : shape_views) {
+			if (view)
+				view->Release();
 		}
 	}
 

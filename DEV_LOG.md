@@ -1,5 +1,33 @@
 # DEV_LOG
 
+## 2026-08-20 - ShapeKey UAV role correction
+
+- Symptom: YangYang became valid immediately after manually replacing offsets
+  `7fe8c94e -> 1a646636` and scale `81378bbb -> 6fe81411`, proving that the
+  Component/VB repair was correct and the remaining failure was entirely in
+  automatic ShapeKey selection.
+- Root cause: the capture path enumerated every CS SRV and UAV bound to each
+  WWMI ShapeKey loader/multiplier Dispatch, while the transformer selected the
+  scale candidate primarily by byte width. Unrelated same-sized resources made
+  the candidate count ambiguous, so the safe writer correctly refused the
+  ShapeKey replacement. The prior unit fixture also modeled scale as an SRV on
+  slot 2 instead of the observed runtime contract.
+- Fix: capture now reads only the actual original Dispatch roles: offsets from
+  UAV0 and scale from UAV1. The transformer requires offsets to be UAV0 and
+  scale to be UAV1, each observed in both loader and multiplier stages with the
+  selected model's exact native vertex-count size.
+- Performance: each relevant Dispatch now queries two UAV slots instead of all
+  128 CS SRV slots plus all 8 CS UAV slots. Capture OFF remains unchanged.
+- Verification: the native document test now includes the real YangYang hashes,
+  UAV roles, and an unrelated same-sized SRV that must not create ambiguity.
+  Native document, Draw Debug gate, unrestricted agent control, release INI
+  contract, and `git diff --check` passed. `Release|x64` rebuilt with 212
+  pre-existing warnings and zero errors; DLL SHA256 is
+  `0DF63533F2FA05F20652B8F767D5612111439CB3D3AA80148E4329D5D34AA9A0`.
+- Installation boundary: the game remains open and the manually repaired INI
+  remains untouched. The rebuilt DLL is not installed; runtime acceptance is
+  pending after game exit.
+
 ## 2026-08-20 - First-frame ShapeKey observation retention
 
 - Symptom: the current-model selector correctly updated YangYang VB0 to
