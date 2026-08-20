@@ -207,6 +207,8 @@ python .\tools\wwmi_draw_debug_client.py tail --follow
 `dump-raw` exposes future or low-level `DUMP` request forms without another
 client update. `STATUS` includes dump queue/completion counters and the last
 result path/error, allowing the client to wait for render-thread completion.
+It also reports bounded `asset_capture` diagnostics: selected VB/native vertex
+count plus the latest ShapeKey probe observations and their filter/slot roles.
 
 Targeted mode derives component draw signatures from a mod INI, records only
 matching draws and later draws sharing learned VS/PS identities, and queues one
@@ -449,6 +451,10 @@ draw/compute 探测只在捕获会话中按候选执行一次并去重；捕获�
 ShapeKey loader/multiplier 只读取原始 Dispatch 的 UAV0 offsets 与 UAV1 scale，
 从会话开始即暂存，选定当前模型后才按原生 vertex count 做尺寸过滤，避免首次
 draw 之前已经执行完的 ShapeKey Dispatch 丢失，也避免其它同尺寸资源制造歧义。
+若目标 INI 同时包含 ShapeKey 根节点，而 offsets/scale 尚未形成完整唯一配对，
+本轮会保留整个 INI，不会先写 VB0/Component 再把模型置于半修复状态。agent
+`STATUS` 的 `asset_capture` 字段可直接查看目标 VB、原生顶点数以及最近的
+ShapeKey filter/slot 观测。
 
 第一次 F7 中先捕获的 VB 观测会保留到同一轮旧贴图 Hash 解析出可信 Path，
 生成 Path 与修复 VB 之间不再要求额外重载。

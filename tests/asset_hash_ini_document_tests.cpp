@@ -907,11 +907,30 @@ void TestShapeKeyReplacementRejectsAmbiguousBufferSize()
 	const std::wstring updated = TransformVbHashIniDocument(
 		source, vb_observations, shape_observations);
 	Require(
-		updated.find(L"hash = 1a646636") != std::wstring::npos &&
+		updated == source &&
+		updated.find(L"hash = 7fe8c94e") != std::wstring::npos &&
 		updated.find(L"hash = 81378bbb") != std::wstring::npos &&
 		updated.find(L"hash = 6fe81411") == std::wstring::npos &&
 		updated.find(L"hash = 12345678") == std::wstring::npos,
-		"two scale-sized buffers must preserve the old scale hash while offsets remain repairable");
+		"an ambiguous ShapeKey pair must preserve the entire document");
+}
+
+void TestVbReplacementWaitsForShapeKeyPair()
+{
+	const std::wstring source =
+		VbSourceDocument() +
+		L"\r\n[TextureOverrideShapeKeyOffsets_ib0]\r\n"
+		L"hash = 7fe8c94e\r\n"
+		L"\r\n[TextureOverrideShapeKeyScale_ib0]\r\n"
+		L"hash = 81378bbb\r\n";
+	const VbHashObservationList vb_observations = {
+		{L"/Game/Test/Body.Body", 0x11111111, 144069, 83268, 1000},
+		{L"/Game/Test/Shared.Shared", 0x11111111, 227337, 34740, 1000}};
+	const std::wstring updated = TransformVbHashIniDocument(
+		source, vb_observations, ShapeKeyHashObservationList());
+	Require(
+		updated == source,
+		"VB and Component repair must wait for a complete ShapeKey pair");
 }
 
 void TestMeshVertexCountSelectsOneIniWithoutComponentMatching()
@@ -997,6 +1016,7 @@ int main()
 	TestVbRangeReplacementRejectsTwoContiguousCandidates();
 	TestVbRangeReplacementWorksWhenHashIsUnchanged();
 	TestShapeKeyReplacementRejectsAmbiguousBufferSize();
+	TestVbReplacementWaitsForShapeKeyPair();
 	TestMeshVertexCountSelectsOneIniWithoutComponentMatching();
 	TestDrawSignaturesDoNotDependOnOldVbHashOrMeshVertexCount();
 	TestPathlessCurrentModelObservationRepairsOnlyWhenEnabled();

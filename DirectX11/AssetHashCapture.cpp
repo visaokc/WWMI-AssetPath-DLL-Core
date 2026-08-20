@@ -1346,6 +1346,47 @@ bool AssetHashCaptureNeedsShapeKeyObservation(
 	return needed;
 }
 
+std::string AssetHashCaptureDiagnosticsJson()
+{
+	std::string json;
+	AcquireSRWLockShared(&capture_lock);
+	char header[384];
+	sprintf_s(
+		header,
+		"\"mode\":%u,\"target_vb\":\"%08x\",\"target_vertices\":%u,"
+		"\"vb_observations\":%llu,\"shape_probes\":%llu,"
+		"\"shape_observations\":%llu,\"shape\":[",
+		static_cast<unsigned>(capture_mode),
+		target_vb_hash,
+		target_vertex_count,
+		static_cast<unsigned long long>(captured_vb_hashes.size()),
+		static_cast<unsigned long long>(shape_key_probe_keys.size()),
+		static_cast<unsigned long long>(captured_shape_key_hashes.size()));
+	json = header;
+	size_t begin = captured_shape_key_hashes.size() > 16
+		? captured_shape_key_hashes.size() - 16
+		: 0;
+	for (size_t i = begin; i < captured_shape_key_hashes.size(); ++i) {
+		const ShapeKeyHashObservation& observation = captured_shape_key_hashes[i];
+		char item[192];
+		sprintf_s(
+			item,
+			"%s{\"hash\":\"%08x\",\"bytes\":%u,\"stride\":%u,"
+			"\"filter\":%u,\"slot\":%u,\"uav\":%s}",
+			i == begin ? "" : ",",
+			observation.hash,
+			observation.byte_width,
+			observation.structure_byte_stride,
+			observation.filter_index,
+			observation.slot,
+			observation.unordered_access ? "true" : "false");
+		json += item;
+	}
+	json += "]";
+	ReleaseSRWLockShared(&capture_lock);
+	return json;
+}
+
 const wchar_t *AssetHashCaptureStatusText()
 {
 	AcquireSRWLockShared(&capture_lock);

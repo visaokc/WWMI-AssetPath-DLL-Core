@@ -1,4 +1,5 @@
 #include "DrawDebugStream.h"
+#include "AssetHashCapture.h"
 #include "log.h"
 
 #include <Windows.h>
@@ -134,7 +135,7 @@ DWORD WINAPI WriterThreadProc(void *)
 
 std::string StatusJson()
 {
-	char buf[2048];
+	char buf[8192];
 	char path_utf8[MAX_PATH * 3] = {};
 	char dump_path_utf8[MAX_PATH * 3] = {};
 	char dump_error[512] = {};
@@ -159,19 +160,21 @@ std::string StatusJson()
 		if (*p == '"' || *p == '\\' || (unsigned char)*p < 0x20)
 			*p = '_';
 	}
+	std::string asset_capture = AssetHashCaptureDiagnosticsJson();
 	sprintf_s(buf,
 		"{\"active\":%s,\"agent_hunting_required\":false,\"control_allowed\":%s,"
 		"\"frame\":%llu,\"sequence\":%llu,"
 		"\"written\":%llu,\"dropped\":%llu,\"path\":\"%s\","
 		"\"pending_dumps\":%u,\"completed_dumps\":%llu,\"last_dump_ok\":%s,"
-		"\"last_dump_path\":\"%s\",\"last_dump_error\":\"%s\"}\n",
+		"\"last_dump_path\":\"%s\",\"last_dump_error\":\"%s\","
+		"\"asset_capture\":{%s}}\n",
 		active.load() ? "true" : "false",
 		control_allowed.load() ? "true" : "false",
 		frame.load(), sequence.load(),
 		written.load(), dropped.load(), path_utf8,
 		pending_dumps.load(), completed_dumps.load(),
 		last_dump_ok.load() ? "true" : "false",
-		dump_path_utf8, dump_error);
+		dump_path_utf8, dump_error, asset_capture.c_str());
 	return std::string(buf);
 }
 

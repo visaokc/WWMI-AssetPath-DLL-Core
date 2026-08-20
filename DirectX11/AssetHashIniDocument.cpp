@@ -2056,6 +2056,8 @@ std::wstring TransformVbHashIniDocument(
 	}
 
 	std::map<uint32_t, uint32_t> shape_replacements;
+	bool has_target_shape_roots = false;
+	bool target_shape_roots_resolved = true;
 	for (const auto& roots : shape_roots) {
 		uint32_t host_hash = roots.first.second;
 		if (!host_hash) {
@@ -2068,6 +2070,7 @@ std::wstring TransformVbHashIniDocument(
 		auto family = replacements.find({roots.first.first, host_hash});
 		if (family == replacements.end())
 			continue;
+		has_target_shape_roots = true;
 		size_t offsets_roots = 0;
 		size_t scale_roots = 0;
 		uint32_t old_offsets = 0;
@@ -2081,8 +2084,10 @@ std::wstring TransformVbHashIniDocument(
 				old_scale = root.old_hash;
 			}
 		}
-		if (offsets_roots != 1 || scale_roots != 1)
+		if (offsets_roots != 1 || scale_roots != 1) {
+			target_shape_roots_resolved = false;
 			continue;
+		}
 
 		uint32_t current_offsets = 0;
 		uint32_t current_scale = 0;
@@ -2106,11 +2111,17 @@ std::wstring TransformVbHashIniDocument(
 				++scale_matches;
 			}
 		}
-		if (offsets_matches == 1 && current_offsets != old_offsets)
+		if (offsets_matches != 1 || scale_matches != 1) {
+			target_shape_roots_resolved = false;
+			continue;
+		}
+		if (current_offsets != old_offsets)
 			shape_replacements[old_offsets] = current_offsets;
-		if (scale_matches == 1 && current_scale != old_scale)
+		if (current_scale != old_scale)
 			shape_replacements[old_scale] = current_scale;
 	}
+	if (has_target_shape_roots && !target_shape_roots_resolved)
+		return source;
 
 	if (!shape_replacements.empty()) {
 		for (size_t i = 0; i < lines.size();) {

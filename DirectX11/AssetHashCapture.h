@@ -47,4 +47,5 @@ bool AssetHashCaptureNeedsCurrentModelVertexCount(uint32_t hash);
 bool AssetHashCaptureNeedsShapeKeyObservation(
 	uint32_t hash,
 	uint32_t filter_index);
+std::string AssetHashCaptureDiagnosticsJson();
 const wchar_t *AssetHashCaptureStatusText();

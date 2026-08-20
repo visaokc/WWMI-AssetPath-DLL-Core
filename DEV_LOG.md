@@ -1,5 +1,31 @@
 # DEV_LOG
 
+## 2026-08-20 - ShapeKey capture diagnostics and atomic repair gate
+
+- Runtime correction: the first UAV-role build was installed and the following
+  F7 run left the YangYang INI byte-for-byte unchanged. Therefore that run did
+  not prove an incorrect replacement; it proved the ShapeKey writer was never
+  reached with a complete accepted pair. The previously stated ambiguity cause
+  was not sufficiently verified.
+- Diagnostics: local agent `STATUS` now exposes bounded `asset_capture` state:
+  mode, selected VB/native vertex count, VB/ShapeKey observation counts, probe
+  count, and the latest 16 ShapeKey hash/size/filter/slot records. This makes
+  the next runtime check identify the exact missing stage without INI markers
+  or broad frame dumps.
+- Safety: when a selected VB family has ShapeKey roots, VB0, Component ranges,
+  offsets, and scale are now one atomic repair unit. Missing or ambiguous
+  offsets/scale returns the original document rather than committing a partial
+  VB/Component update that collapses the model.
+- Recovery: the live YangYang INI was manually returned to the known-good
+  ShapeKey hashes and backed up at
+  `D:\WWMI\Backups\ManualRecovery-20260820-111100`.
+- Verification: native document, Draw Debug gate, unrestricted agent control,
+  release INI contract, and `git diff --check` passed. `Release|x64` rebuilt
+  with 212 pre-existing warnings and zero errors; DLL SHA256 is
+  `DF32EF04B0CB4016E0B860233FB067A6DD9FBB0AECBE8ABD87580C7414803BBC`.
+- Installation boundary: the game remains open, so the diagnostic/safety DLL
+  is not installed. Runtime diagnosis remains pending after game exit.
+
 ## 2026-08-20 - ShapeKey UAV role correction
 
 - Symptom: YangYang became valid immediately after manually replacing offsets
