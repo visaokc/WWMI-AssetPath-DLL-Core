@@ -27,4 +27,17 @@ if ($body.IndexOf('ReleaseSRWLockExclusive(&capture_lock);') -gt
     throw 'The writer must be signaled after releasing the capture lock.'
 }
 
+$refreshBegin = $source.IndexOf('void RefreshAssetHashCaptureSources()')
+$refreshEnd = $source.IndexOf(
+    'void ObserveAssetHashForAuthoring(',
+    $refreshBegin
+)
+if ($refreshBegin -lt 0 -or $refreshEnd -le $refreshBegin) {
+    throw 'Asset capture source refresh implementation was not found.'
+}
+$refreshBody = $source.Substring($refreshBegin, $refreshEnd - $refreshBegin)
+if (-not $refreshBody.Contains('ResetCaptureSessionLocked();')) {
+    throw 'Config refresh must reset the model observation session.'
+}
+
 Write-Host 'asset_hash_capture_wakeup: PASS'

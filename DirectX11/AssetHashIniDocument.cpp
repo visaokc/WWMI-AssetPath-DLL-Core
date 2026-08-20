@@ -2071,8 +2071,10 @@ std::wstring TransformVbHashIniDocument(
 		}
 		auto family = replacements.find({roots.first.first, host_hash});
 		uint64_t vertex_count = 0;
-		if (selected_target_hash == host_hash &&
-				selected_target_vertex_count) {
+		if (selected_target_vertex_count &&
+				(selected_target_hash == host_hash ||
+				 (family != replacements.end() &&
+				  family->second.hash == selected_target_hash))) {
 			vertex_count = selected_target_vertex_count;
 		} else if (family != replacements.end()) {
 			vertex_count = family->second.vertex_count;

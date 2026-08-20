@@ -1040,50 +1040,13 @@ void RefreshAssetHashCaptureSources()
 	}
 
 	AcquireSRWLockExclusive(&capture_lock);
+	ResetCaptureSessionLocked();
 	source_files = std::move(files);
 	watched_identities = std::move(identities);
 	watched_legacy_hashes = std::move(legacy_hashes);
 	watched_shape_key_hashes = std::move(shape_key_hashes);
 	model_draw_signature_sources = std::move(draw_signature_sources);
 	model_draw_signature_counts = std::move(draw_signature_counts);
-	model_vertex_probe_hashes.clear();
-	model_vertex_counts.clear();
-	model_draw_signatures.clear();
-	model_source_scores.clear();
-	target_source_file.clear();
-	target_vb_hash = 0;
-	target_vertex_count = 0;
-	target_profile_loaded = false;
-	for (auto i = captured_hashes.begin();
-			i != captured_hashes.end();) {
-		if (watched_identities.find(i->first) ==
-				watched_identities.end()) {
-			captured_observation_count -= i->second.size();
-			i = captured_hashes.erase(i);
-		} else {
-			++i;
-		}
-	}
-	for (auto i = observed_name_paths.begin();
-			i != observed_name_paths.end();) {
-		if (watched_identities.find(
-					IdentityKey(L"match_asset_name", i->first)) ==
-				watched_identities.end()) {
-			i = observed_name_paths.erase(i);
-		} else {
-			++i;
-		}
-	}
-	for (auto i = ambiguous_names.begin(); i != ambiguous_names.end();) {
-		if (watched_identities.find(
-					IdentityKey(L"match_asset_name", *i)) ==
-				watched_identities.end()) {
-			i = ambiguous_names.erase(i);
-		} else {
-			++i;
-		}
-	}
-	PromoteRecentObservations();
 	if (capture_mode != CaptureMode::Off &&
 			(has_identity_aliases ||
 			 needs_canonicalization ||

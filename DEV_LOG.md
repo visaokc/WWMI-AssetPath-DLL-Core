@@ -60,7 +60,22 @@
   the live INI without a character switch. Diff against the installation
   backup contains exactly four replacements: three offsets hashes to
   `1a646636` and one scale hash to `6fe81411`; VB0 and all Component ranges are
-  unchanged. In-game visual acceptance after reload remains pending.
+  unchanged.
+- Repeat extraction correction: replacing the repaired directory in the same
+  active capture session with the original archive restored old VB0, Component,
+  and ShapeKey values but retained deduplicated runtime observations. Config
+  source refresh now resets the bounded model observation session before
+  rebuilding source signatures, so the same archive can be repaired again.
+  When an old host maps to the selected new VB, ShapeKey association now uses
+  the selected target's authoritative vertex count instead of the noisy
+  replacement-family deductions.
+- Verification: native tests cover a full old-host replacement with conflicting
+  vertex counts, and the refresh contract requires a capture-session reset.
+  All native/static tests passed; `Release|x64` rebuilt with 212 pre-existing
+  warnings and zero errors. DLL SHA256 is
+  `095335FB6A88F94C9BA423F81EECBBC84B76D092AECA61B7D10F331CC05E7501`.
+  Installation and repeated-archive runtime acceptance remain pending after
+  game exit.
 
 ## 2026-08-20 - ShapeKey capture diagnostics and atomic repair gate
 

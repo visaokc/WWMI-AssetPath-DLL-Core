@@ -826,7 +826,8 @@ void TestVbRangeAndShapeKeyReplacementUsesUniqueStructure()
 		L"endif\r\n";
 	const VbHashObservationList vb_observations = {
 		{L"/Game/Test/Body.Body", 0x11111111, 144069, 83268, 1000},
-		{L"/Game/Test/Shared.Shared", 0x11111111, 227337, 34740, 1000}};
+		{L"/Game/Test/Shared.Shared", 0x11111111, 227337, 34740, 1000},
+		{L"", 0x11111111, 999, 1, 2000}};
 	const ShapeKeyHashObservationList shape_observations = {
 		{0x1a646636, 24000, 0, 3333, 0, true},
 		{0x1a646636, 24000, 0, 4444, 0, true},
@@ -835,7 +836,12 @@ void TestVbRangeAndShapeKeyReplacementUsesUniqueStructure()
 		{0x12345678, 4000, 0, 3333, 2, false},
 		{0x12345678, 4000, 0, 4444, 2, false}};
 	const std::wstring updated = TransformVbHashIniDocument(
-		source, vb_observations, shape_observations);
+		source,
+		vb_observations,
+		shape_observations,
+		true,
+		0x11111111,
+		1000);
 	Require(
 		Count(updated, L"hash = 11111111") == 2 &&
 		updated.find(L"match_first_index = 144069") != std::wstring::npos &&
