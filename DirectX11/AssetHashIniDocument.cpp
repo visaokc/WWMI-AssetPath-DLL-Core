@@ -1644,7 +1644,8 @@ void AddPathVariables(
 std::wstring TransformVbHashIniDocument(
 	const std::wstring& source,
 	const VbHashObservationList& observations,
-	const ShapeKeyHashObservationList& shape_key_observations)
+	const ShapeKeyHashObservationList& shape_key_observations,
+	bool allow_pathless_observations)
 {
 	std::vector<std::wstring> lines = SplitLines(source);
 	std::map<std::wstring, std::set<std::wstring>> path_variables;
@@ -1772,6 +1773,19 @@ std::wstring TransformVbHashIniDocument(
 	typedef std::map<uint32_t, ObservedDrawFamily> ObservedHashSignatures;
 	std::map<std::wstring, ObservedHashSignatures> observed_signatures;
 	for (const VbHashObservation& observation : observations) {
+		if (allow_pathless_observations && observation.asset_path.empty()) {
+			VbDrawSignature signature = {
+				observation.first_index,
+				observation.index_count};
+			for (const auto& family : family_signatures) {
+				ObservedDrawFamily& observed =
+					observed_signatures[family.first.variable][observation.hash];
+				observed.signatures.insert(signature);
+				if (observation.vertex_count)
+					observed.vertex_counts.insert(observation.vertex_count);
+			}
+			continue;
+		}
 		auto path = path_variables.find(Lower(observation.asset_path));
 		if (path == path_variables.end() || !observation.hash)
 			continue;
@@ -2133,6 +2147,46 @@ std::wstring TransformVbHashIniDocument(
 		}
 	}
 	return JoinLines(lines);
+}
+
+bool CollectVbHashIniMeshVertexCount(
+	const std::wstring& source,
+	uint32_t *vertex_count)
+{
+	if (!vertex_count)
+		return false;
+	std::vector<std::wstring> lines = SplitLines(source);
+	bool in_constants = false;
+	bool found = false;
+	uint32_t parsed = 0;
+	for (const std::wstring& line : lines) {
+		std::wstring section;
+		if (ParseSectionHeader(line, &section)) {
+			in_constants = !_wcsicmp(section.c_str(), L"Constants");
+			continue;
+		}
+		if (!in_constants)
+			continue;
+		std::wstring trimmed = Lower(Trim(line));
+		const std::wstring key = L"global $mesh_vertex_count";
+		if (trimmed.compare(0, key.size(), key))
+			continue;
+		size_t equals = trimmed.find(L'=', key.size());
+		if (equals == std::wstring::npos ||
+				!Trim(trimmed.substr(key.size(), equals - key.size())).empty())
+			continue;
+		uint32_t value = 0;
+		if (!ParseDecimal(Trim(trimmed.substr(equals + 1)), &value) || !value)
+			continue;
+		if (found && parsed != value)
+			return false;
+		parsed = value;
+		found = true;
+	}
+	if (!found)
+		return false;
+	*vertex_count = parsed;
+	return true;
 }
 
 std::set<uint32_t> CollectVbHashIniCandidates(

@@ -84,10 +84,15 @@ std::wstring TransformAssetHashIniDocumentToCleanPaths(
 std::wstring TransformVbHashIniDocument(
 	const std::wstring& source,
 	const VbHashObservationList& observations,
-	const ShapeKeyHashObservationList& shape_key_observations = {});
+	const ShapeKeyHashObservationList& shape_key_observations = {},
+	bool allow_pathless_observations = false);
 
 std::set<uint32_t> CollectVbHashIniCandidates(
 	const std::wstring& source);
+
+bool CollectVbHashIniMeshVertexCount(
+	const std::wstring& source,
+	uint32_t *vertex_count);
 
 std::set<std::tuple<uint32_t, uint32_t, uint32_t>>
 CollectVbHashIniSignatures(const std::wstring& source);

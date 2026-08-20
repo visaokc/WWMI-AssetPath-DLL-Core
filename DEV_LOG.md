@@ -1,5 +1,40 @@
 # DEV_LOG
 
+## 2026-08-20 - Current-model pathless VB family selection
+
+- Purpose: remove Path and agent dependencies from normal VB0, Component, and
+  ShapeKey repair while preventing one character INI from being inferred from
+  another character's Component structure.
+- Target selection: each F7 mode reads only the lightweight
+  `global $mesh_vertex_count` identity from loaded INIs. A live VB0 selects a
+  target only when its vertex count maps to exactly one INI. Only then does the
+  writer parse that selected document's VB family; ambiguous counts do not
+  write VB or ShapeKey changes.
+- Repair behavior: the selected document accepts a pathless live draw family,
+  so one unique structural match can replace VB0 and current
+  `match_first_index` / `match_index_count` values. ShapeKey observations are
+  restricted to buffers sized from the selected model's vertex count and the
+  existing WWMI loader/multiplier roles. Agent capture remains diagnostic-only.
+- Performance: capture OFF retains the atomic fast path. During F7, each unseen
+  VB hash queries its Buffer size once until the model is selected; selected
+  draw signatures and compute resources remain session-deduplicated. Other
+  character INIs are never parsed for Component comparison.
+- Verification: native document tests cover mesh-count extraction, pathless
+  target-only repair, and non-target rejection. Native tests, Draw Debug human
+  gate, unrestricted agent control, release INI contract, and
+  `git diff --check` passed. `Release|x64` rebuilt with 212 pre-existing
+  warnings and zero errors. DLL SHA256:
+  `A3590A289DF691733A8BE50280BDC40A0008E7ACA62AFBCC6F47D52FBAEC1389`.
+- Live boundary: loaded Mod metadata currently maps vertex count `78034`
+  uniquely to `D:\WWMI\Mods\YangYang\mod.ini`. That INI remained unchanged at
+  SHA256 `AE8EFC71F286540BF8B599B909D36F2F6DAEC01AC9BB3AF596421BE0592A5B12`.
+  After WuWa exited, the DLL was installed and read back at `D:\WWMI\d3d11.dll`
+  with the build SHA256. The previous DLL and unchanged live `d3dx.ini` were
+  backed up under
+  `D:\WWMI\Backups\CurrentModelPathless-20260820-065140`; `d3dx.ini` and the
+  YangYang INI remained byte-identical. User-driven in-game F7 acceptance
+  remains pending; no Mod INI was repaired by this round.
+
 ## 2026-08-20 - Unrestricted agent frame-resource and shader dump control
 
 - Purpose: make the local agent channel sufficient for future diagnostics

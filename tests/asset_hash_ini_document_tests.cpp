@@ -911,6 +911,43 @@ void TestShapeKeyReplacementRejectsAmbiguousBufferSize()
 		updated.find(L"hash = 12345678") == std::wstring::npos,
 		"two scale-sized buffers must preserve the old scale hash while offsets remain repairable");
 }
+
+void TestMeshVertexCountSelectsOneIniWithoutComponentMatching()
+{
+	const std::wstring source =
+		L"[Constants]\r\n"
+		L"global $mesh_vertex_count = 78034\r\n\r\n" +
+		VbSourceDocument();
+	uint32_t vertex_count = 0;
+	Require(
+		CollectVbHashIniMeshVertexCount(source, &vertex_count) &&
+		vertex_count == 78034,
+		"the lightweight current-model identity must read mesh_vertex_count");
+}
+
+void TestPathlessCurrentModelObservationRepairsOnlyWhenEnabled()
+{
+	const VbHashObservationList observations = {
+		{L"", 0x11111111, 500, 120, 1000},
+		{L"", 0x11111111, 620, 60, 1000}};
+	const std::wstring unchanged = TransformVbHashIniDocument(
+		VbSourceDocument(), observations);
+	const std::wstring updated = TransformVbHashIniDocument(
+		VbSourceDocument(),
+		observations,
+		ShapeKeyHashObservationList(),
+		true);
+	Require(
+		Count(unchanged, L"hash = aaaaaaaa") == 2,
+		"pathless observations must not affect non-target documents");
+	Require(
+		Count(updated, L"hash = 11111111") == 2 &&
+		updated.find(L"match_first_index = 500") != std::wstring::npos &&
+		updated.find(L"match_index_count = 120") != std::wstring::npos &&
+		updated.find(L"match_first_index = 620") != std::wstring::npos &&
+		updated.find(L"match_index_count = 60") != std::wstring::npos,
+		"the selected current-model document must accept a pathless draw family");
+}
 }
 
 int main()
@@ -936,6 +973,8 @@ int main()
 	TestVbRangeReplacementRejectsTwoContiguousCandidates();
 	TestVbRangeReplacementWorksWhenHashIsUnchanged();
 	TestShapeKeyReplacementRejectsAmbiguousBufferSize();
+	TestMeshVertexCountSelectsOneIniWithoutComponentMatching();
+	TestPathlessCurrentModelObservationRepairsOnlyWhenEnabled();
 	std::cout << "asset_hash_ini_document_tests: PASS\n";
 	return 0;
 }

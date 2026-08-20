@@ -297,14 +297,19 @@ Hash-to-Path resolution before conversion.
   supported.
 - Each transition from OFF to any F7 mode starts a fresh capture session.
   Switching directly between writing modes keeps the same session.
-- Path-linked VB0 families also repair `match_first_index` and
-  `match_index_count` when the current draws form one unique contiguous
-  component sequence. ShapeKey offset and scale hashes are repaired only when
-  the same Path-linked VB family and the WWMI loader/multiplier buffer sizes
-  produce one unique match; ambiguous families remain unchanged.
+- VB0 repair first selects one current-model INI by matching the live VB0
+  vertex count to that INI's unique `global $mesh_vertex_count`. Only the
+  selected INI's component family is parsed; component structures from other
+  character INIs are not compared. Its pathless draw family can repair VB0,
+  `match_first_index`, and `match_index_count` when the result is unique.
+  ShapeKey offset and scale hashes use the selected model's vertex count and
+  WWMI loader/multiplier buffer roles. Ambiguous INIs or families remain
+  unchanged.
 - Extended draw and compute probing is session-scoped and deduplicated. With
   capture OFF, the hot path is one atomic flag read; during capture, known
-  draw signatures avoid resource scans unless ShapeKey correlation is armed.
+  VB hashes probe their buffer size only once, and selected-model draw
+  signatures avoid repeated resource scans unless ShapeKey correlation is
+  armed.
 - VB observations from a first F7 pass are retained until the same pass
   resolves legacy texture Hashes into trusted Paths, so Path creation and VB
   repair do not require an intermediate reload.
@@ -430,11 +435,14 @@ DLL 只能记录游戏实际加载过的贴图状态，不能强制游戏加载�
 `F7` 或 `Shift+F7` 会建立一个全新的捕获会话；从备份模式直接切换到激进
 模式仍属于同一个会话。
 
-Path 锁定的 VB0 family 若能在当前 draw 中形成唯一连续的 Component 序列，
-会同时修复 `match_first_index` 和 `match_index_count`。ShapeKey offsets/scale
-Hash 只有在同一 Path/VB family 与 WWMI loader/multiplier Buffer 尺寸共同得到
-唯一结果时才更新；多候选保持原值。扩展 draw/compute 探测只在捕获会话中
-按候选执行一次并去重；捕获关闭时热路径只读取一个 atomic flag。
+VB0 修复先用当前实际 VB0 的 vertex count 唯一匹配目标 INI 的
+`global $mesh_vertex_count`。只有命中的当前模型 INI 才解析 Component family，
+不会拿其它角色 INI 的 Component 结构参与比较。目标 INI 可用不含 Path 的
+draw family 唯一修复 VB0、`match_first_index` 和 `match_index_count`。
+ShapeKey offsets/scale Hash 继续通过该模型 vertex count 与 WWMI
+loader/multiplier Buffer 角色锁定；INI 或 family 多候选时保持原值。扩展
+draw/compute 探测只在捕获会话中按候选执行一次并去重；捕获关闭时热路径只
+读取一个 atomic flag，捕获期间每个未知 VB Hash 也只读取一次 Buffer 尺寸。
 
 第一次 F7 中先捕获的 VB 观测会保留到同一轮旧贴图 Hash 解析出可信 Path，
 生成 Path 与修复 VB 之间不再要求额外重载。

@@ -813,33 +813,38 @@ void HackerContext::BeforeDraw(DrawContext &data)
 
 	if (AssetHashCaptureEnabled() && data.call_info.IndexCount) {
 		uint32_t vb0_hash = mCurrentVertexBuffers[0];
+		uint32_t vertex_count = 0;
+		ID3D11Buffer *vb0 = nullptr;
+		UINT stride = 0;
+		UINT offset = 0;
 		if (!vb0_hash) {
-			ID3D11Buffer *vb0 = nullptr;
-			UINT stride = 0;
-			UINT offset = 0;
 			mOrigContext1->IAGetVertexBuffers(0, 1, &vb0, &stride, &offset);
 			vb0_hash = vb0 ? GetResourceHash(vb0) : 0;
-			if (vb0)
-				vb0->Release();
 			mCurrentVertexBuffers[0] = vb0_hash;
 		}
-		if (vb0_hash && AssetHashCaptureNeedsVbObservation(
-				vb0_hash,
-				data.call_info.FirstIndex,
-				data.call_info.IndexCount)) {
-			uint32_t vertex_count = 0;
-			ID3D11Buffer *vb0 = nullptr;
-			UINT stride = 0;
-			UINT offset = 0;
-			mOrigContext1->IAGetVertexBuffers(0, 1, &vb0, &stride, &offset);
+		if (AssetHashCaptureNeedsCurrentModelVertexCount(vb0_hash)) {
+			if (!vb0)
+				mOrigContext1->IAGetVertexBuffers(0, 1, &vb0, &stride, &offset);
 			if (vb0 && stride) {
 				D3D11_BUFFER_DESC desc = {};
 				vb0->GetDesc(&desc);
 				if (desc.ByteWidth > offset)
 					vertex_count = (desc.ByteWidth - offset) / stride;
 			}
-			if (vb0)
-				vb0->Release();
+		}
+		if (vb0)
+			vb0->Release();
+		if (vb0_hash && AssetHashCaptureNeedsVbObservation(
+				vb0_hash,
+				data.call_info.FirstIndex,
+				data.call_info.IndexCount,
+				vertex_count)) {
+			ObserveVbHashForAuthoring(
+				L"",
+				vb0_hash,
+				data.call_info.FirstIndex,
+				data.call_info.IndexCount,
+				vertex_count);
 			ID3D11ShaderResourceView *views[
 				D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
 			mOrigContext1->PSGetShaderResources(

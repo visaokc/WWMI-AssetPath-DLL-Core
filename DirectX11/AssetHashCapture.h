@@ -41,7 +41,9 @@ bool AssetHashCaptureEnabled();
 bool AssetHashCaptureNeedsVbObservation(
 	uint32_t hash,
 	uint32_t first_index,
-	uint32_t index_count);
+	uint32_t index_count,
+	uint32_t vertex_count);
+bool AssetHashCaptureNeedsCurrentModelVertexCount(uint32_t hash);
 bool AssetHashCaptureNeedsShapeKeyObservation(
 	uint32_t hash,
 	uint32_t filter_index);

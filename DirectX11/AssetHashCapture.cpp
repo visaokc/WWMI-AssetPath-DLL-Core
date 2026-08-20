@@ -46,11 +46,15 @@ DWORD status_until = 0;
 std::vector<std::wstring> source_files;
 std::set<std::wstring> watched_identities;
 std::set<uint32_t> watched_legacy_hashes;
-std::set<uint32_t> watched_vb_hashes;
-std::set<std::tuple<uint32_t, uint32_t, uint32_t>> watched_vb_signatures;
 std::set<uint32_t> watched_shape_key_hashes;
 std::set<std::tuple<uint32_t, uint32_t, uint32_t>> vb_probe_keys;
 std::set<std::pair<uint32_t, uint32_t>> shape_key_probe_keys;
+std::map<uint32_t, std::set<std::wstring>> mesh_vertex_sources;
+std::set<uint32_t> model_vertex_probe_hashes;
+std::wstring target_source_file;
+uint32_t target_vb_hash = 0;
+uint32_t target_vertex_count = 0;
+bool target_profile_loaded = false;
 AssetHashObservationMap captured_hashes;
 size_t captured_observation_count = 0;
 VbHashObservationList captured_vb_hashes;
@@ -59,7 +63,6 @@ std::set<std::tuple<std::wstring, uint32_t, uint32_t, uint32_t, uint32_t>>
 ShapeKeyHashObservationList captured_shape_key_hashes;
 std::set<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, bool>>
 	captured_shape_key_hash_keys;
-bool shape_key_repair_armed = false;
 std::map<std::wstring, std::wstring> observed_name_paths;
 std::set<std::wstring> ambiguous_names;
 
@@ -86,7 +89,12 @@ void ResetCaptureSessionLocked()
 	captured_shape_key_hash_keys.clear();
 	vb_probe_keys.clear();
 	shape_key_probe_keys.clear();
-	shape_key_repair_armed = false;
+	mesh_vertex_sources.clear();
+	model_vertex_probe_hashes.clear();
+	target_source_file.clear();
+	target_vb_hash = 0;
+	target_vertex_count = 0;
+	target_profile_loaded = false;
 	observed_name_paths.clear();
 	ambiguous_names.clear();
 	recent_assets.clear();
@@ -612,6 +620,7 @@ void WriteSnapshot(
 	const ShapeKeyHashObservationList& shape_key_observations,
 	const AssetHashPathIdentityMap& legacy_hash_identities,
 	const std::set<uint32_t>& ambiguous_hashes,
+	const std::wstring& target_source,
 	CaptureMode mode)
 {
 	static const std::wstring game_version = []() {
@@ -657,10 +666,14 @@ void WriteSnapshot(
 				legacy_hash_identities,
 				ambiguous_hashes,
 				game_version);
-		transformed = TransformVbHashIniDocument(
-			transformed,
-			vb_observations,
-			shape_key_observations);
+		if (!target_source.empty() &&
+				!_wcsicmp(source_path.c_str(), target_source.c_str())) {
+			transformed = TransformVbHashIniDocument(
+				transformed,
+				vb_observations,
+				shape_key_observations,
+				true);
+		}
 		if (transformed == previous)
 			continue;
 		if (!AtomicWriteUtf8(output_path, transformed)) {
@@ -678,12 +691,32 @@ DWORD WINAPI CaptureWriterThread(void *)
 		WaitForSingleObject(capture_event, INFINITE);
 		Sleep(200);
 
+		std::wstring profile_source;
+		AcquireSRWLockShared(&capture_lock);
+		if (!target_source_file.empty() && !target_profile_loaded)
+			profile_source = target_source_file;
+		ReleaseSRWLockShared(&capture_lock);
+		if (!profile_source.empty()) {
+			std::wstring profile_document;
+			if (ReadUtf8File(profile_source, &profile_document)) {
+				std::set<uint32_t> shape_hashes =
+					CollectShapeKeyHashIniCandidates(profile_document);
+				AcquireSRWLockExclusive(&capture_lock);
+				if (!_wcsicmp(target_source_file.c_str(), profile_source.c_str())) {
+					watched_shape_key_hashes = std::move(shape_hashes);
+					target_profile_loaded = true;
+				}
+				ReleaseSRWLockExclusive(&capture_lock);
+			}
+		}
+
 		std::vector<std::wstring> sources;
 		AssetHashObservationMap observations;
 		VbHashObservationList vb_observations;
 		ShapeKeyHashObservationList shape_key_observations;
 		AssetHashPathIdentityMap legacy_hash_identities;
 		std::set<uint32_t> ambiguous_hashes;
+		std::wstring target_source;
 		CaptureMode mode = CaptureMode::Off;
 		AcquireSRWLockExclusive(&capture_lock);
 		if (capture_mode == CaptureMode::Off || !capture_dirty) {
@@ -696,6 +729,7 @@ DWORD WINAPI CaptureWriterThread(void *)
 		observations = captured_hashes;
 		vb_observations = captured_vb_hashes;
 		shape_key_observations = captured_shape_key_hashes;
+		target_source = target_source_file;
 		PruneReleasedRecentAssets(GetTickCount64());
 		legacy_hash_identities = BuildLegacyHashIdentitySnapshot();
 		ambiguous_hashes = BuildAmbiguousHashSnapshot();
@@ -710,6 +744,7 @@ DWORD WINAPI CaptureWriterThread(void *)
 			shape_key_observations,
 			legacy_hash_identities,
 			ambiguous_hashes,
+			target_source,
 			mode);
 	}
 }
@@ -949,9 +984,8 @@ void RefreshAssetHashCaptureSources()
 
 	std::set<std::wstring> identities;
 	std::set<uint32_t> legacy_hashes;
-	std::set<uint32_t> vb_hashes;
-	std::set<std::tuple<uint32_t, uint32_t, uint32_t>> vb_signatures;
 	std::set<uint32_t> shape_key_hashes;
+	std::map<uint32_t, std::set<std::wstring>> vertex_sources;
 	bool has_identity_aliases = false;
 	bool needs_canonicalization = false;
 	for (const std::wstring& file : files) {
@@ -974,26 +1008,22 @@ void RefreshAssetHashCaptureSources()
 		legacy_hashes.insert(
 			found_legacy_hashes.begin(),
 			found_legacy_hashes.end());
-		std::set<uint32_t> found_vb_hashes =
-			CollectVbHashIniCandidates(document);
-		vb_hashes.insert(found_vb_hashes.begin(), found_vb_hashes.end());
-		std::set<std::tuple<uint32_t, uint32_t, uint32_t>>
-			found_vb_signatures = CollectVbHashIniSignatures(document);
-		vb_signatures.insert(
-			found_vb_signatures.begin(), found_vb_signatures.end());
-		std::set<uint32_t> found_shape_key_hashes =
-			CollectShapeKeyHashIniCandidates(document);
-		shape_key_hashes.insert(
-			found_shape_key_hashes.begin(), found_shape_key_hashes.end());
+		uint32_t mesh_vertex_count = 0;
+		if (CollectVbHashIniMeshVertexCount(document, &mesh_vertex_count))
+			vertex_sources[mesh_vertex_count].insert(file);
 	}
 
 	AcquireSRWLockExclusive(&capture_lock);
 	source_files = std::move(files);
 	watched_identities = std::move(identities);
 	watched_legacy_hashes = std::move(legacy_hashes);
-	watched_vb_hashes = std::move(vb_hashes);
-	watched_vb_signatures = std::move(vb_signatures);
 	watched_shape_key_hashes = std::move(shape_key_hashes);
+	mesh_vertex_sources = std::move(vertex_sources);
+	model_vertex_probe_hashes.clear();
+	target_source_file.clear();
+	target_vb_hash = 0;
+	target_vertex_count = 0;
+	target_profile_loaded = false;
 	for (auto i = captured_hashes.begin();
 			i != captured_hashes.end();) {
 		if (watched_identities.find(i->first) ==
@@ -1103,12 +1133,12 @@ void ObserveVbHashForAuthoring(
 	uint32_t index_count,
 	uint32_t vertex_count)
 {
-	if (asset_path.empty() || asset_path.size() > kMaxIdentityCharacters ||
-			!hash || !index_count)
+	if (asset_path.size() > kMaxIdentityCharacters || !hash || !index_count)
 		return;
 	bool changed = false;
 	AcquireSRWLockExclusive(&capture_lock);
 	if (capture_mode != CaptureMode::Off &&
+			(!asset_path.empty() || !target_source_file.empty()) &&
 			captured_vb_hashes.size() < kMaxVbHashObservations) {
 		auto key = std::make_tuple(
 			Lower(asset_path),
@@ -1145,6 +1175,9 @@ void ObserveShapeKeyHashForAuthoring(
 	bool changed = false;
 	AcquireSRWLockExclusive(&capture_lock);
 	if (capture_mode != CaptureMode::Off &&
+			target_vertex_count &&
+			(byte_width == static_cast<uint64_t>(target_vertex_count) * 24 ||
+			 byte_width == static_cast<uint64_t>(target_vertex_count) * 4) &&
 			captured_shape_key_hashes.size() < kMaxVbHashObservations) {
 		auto key = std::make_tuple(
 			hash,
@@ -1208,16 +1241,41 @@ bool AssetHashCaptureEnabled()
 bool AssetHashCaptureNeedsVbObservation(
 	uint32_t hash,
 	uint32_t first_index,
-	uint32_t index_count)
+	uint32_t index_count,
+	uint32_t vertex_count)
+{
+	std::wstring activated_source;
+	AcquireSRWLockExclusive(&capture_lock);
+	if (capture_mode != CaptureMode::Off && target_source_file.empty() &&
+			vertex_count) {
+		auto sources = mesh_vertex_sources.find(vertex_count);
+		if (sources != mesh_vertex_sources.end() && sources->second.size() == 1) {
+			target_source_file = *sources->second.begin();
+			target_vb_hash = hash;
+			target_vertex_count = vertex_count;
+			target_profile_loaded = false;
+			vb_probe_keys.clear();
+			activated_source = target_source_file;
+		}
+	}
+	const auto key = std::make_tuple(hash, first_index, index_count);
+	bool needed = capture_mode != CaptureMode::Off &&
+		!target_source_file.empty() && hash == target_vb_hash &&
+		vb_probe_keys.insert(key).second;
+	ReleaseSRWLockExclusive(&capture_lock);
+	if (!activated_source.empty())
+		LogInfo(
+			"> Asset Hash Capture selected current model INI: %ls\n",
+			activated_source.c_str());
+	return needed;
+}
+
+bool AssetHashCaptureNeedsCurrentModelVertexCount(uint32_t hash)
 {
 	AcquireSRWLockExclusive(&capture_lock);
-	const auto key = std::make_tuple(hash, first_index, index_count);
-	const bool known_signature =
-		watched_vb_hashes.find(hash) != watched_vb_hashes.end() &&
-		watched_vb_signatures.find(key) != watched_vb_signatures.end();
 	bool needed = capture_mode != CaptureMode::Off &&
-		(!known_signature || shape_key_repair_armed) &&
-		vb_probe_keys.insert(key).second;
+		target_source_file.empty() && hash &&
+		model_vertex_probe_hashes.insert(hash).second;
 	ReleaseSRWLockExclusive(&capture_lock);
 	return needed;
 }
@@ -1230,8 +1288,6 @@ bool AssetHashCaptureNeedsShapeKeyObservation(
 	bool needed = capture_mode != CaptureMode::Off &&
 		!watched_shape_key_hashes.empty() &&
 		shape_key_probe_keys.insert({hash, filter_index}).second;
-	if (needed)
-		shape_key_repair_armed = true;
 	ReleaseSRWLockExclusive(&capture_lock);
 	return needed;
 }
