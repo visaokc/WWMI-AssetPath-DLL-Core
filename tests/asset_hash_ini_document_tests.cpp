@@ -925,6 +925,28 @@ void TestMeshVertexCountSelectsOneIniWithoutComponentMatching()
 		"the lightweight current-model identity must read mesh_vertex_count");
 }
 
+void TestDrawSignaturesDoNotDependOnOldVbHashOrMeshVertexCount()
+{
+	const std::wstring source =
+		L"[Constants]\r\n"
+		L"global $mesh_vertex_count = 78034\r\n\r\n"
+		L"[TextureOverrideComponent0]\r\n"
+		L"hash = 15fb50a9\r\n"
+		L"match_first_index = 0\r\n"
+		L"match_index_count = 13842\r\n\r\n"
+		L"[TextureOverrideComponent1]\r\n"
+		L"hash = 15fb50a9\r\n"
+		L"match_first_index = 13842\r\n"
+		L"match_index_count = 33159\r\n";
+	const std::set<std::pair<uint32_t, uint32_t>> signatures =
+		CollectVbHashIniDrawSignatures(source);
+	Require(
+		signatures.size() == 2 &&
+		signatures.count({0, 13842}) == 1 &&
+		signatures.count({13842, 33159}) == 1,
+		"current-model draw signatures must exclude the stale VB hash and exported mesh vertex count");
+}
+
 void TestPathlessCurrentModelObservationRepairsOnlyWhenEnabled()
 {
 	const VbHashObservationList observations = {
@@ -974,6 +996,7 @@ int main()
 	TestVbRangeReplacementWorksWhenHashIsUnchanged();
 	TestShapeKeyReplacementRejectsAmbiguousBufferSize();
 	TestMeshVertexCountSelectsOneIniWithoutComponentMatching();
+	TestDrawSignaturesDoNotDependOnOldVbHashOrMeshVertexCount();
 	TestPathlessCurrentModelObservationRepairsOnlyWhenEnabled();
 	std::cout << "asset_hash_ini_document_tests: PASS\n";
 	return 0;

@@ -1,5 +1,38 @@
 # DEV_LOG
 
+## 2026-08-20 - Native VB identity correction
+
+- Symptom: all four F7 modes generated Path state but never selected the
+  current model, so VB0, Component ranges, and ShapeKey hashes were not sent
+  through the target-only writer.
+- Runtime proof: an agent-only frame dump in the user-selected stable scene
+  found YangYang VB0 `efd45ce3`, stride `12`, and ByteWidth `782076`, which is
+  `65173` native vertices. The INI's `global $mesh_vertex_count = 78034`
+  describes the exported Mod Position buffer, not the native host VB. The
+  previous equality gate could therefore never select this INI.
+- Fix: F7 now builds a compact inverted index of loaded INI
+  `(match_first_index, match_index_count)` signatures. Each live VB hash is
+  scored independently; two signatures are required for a two-Component
+  family and three for larger families, and the winning source must be unique.
+  Only that source is fully parsed and eligible for pathless VB/Component and
+  ShapeKey repair. Exported mesh vertex count is no longer an identity gate;
+  the selected native VB count remains available only for ShapeKey buffer-size
+  correlation.
+- Performance: capture OFF remains one atomic flag read. During F7, INIs are
+  parsed once into a compact inverted index, each `(VB hash, draw signature)`
+  is scored once, and Buffer size is queried once per unseen VB hash until a
+  target is selected. Full Component parsing and writes remain target-only.
+- Validation: the live YangYang draw family matched only
+  `D:\WWMI\Mods\YangYang\mod.ini` across all current `D:\WWMI\Mods` INIs
+  (four unchanged signatures out of seven). Native document, Draw Debug gate,
+  unrestricted agent control, release INI contract, and `git diff --check`
+  passed. `Release|x64` rebuilt with 212 pre-existing warnings and zero errors;
+  DLL SHA256 is
+  `CFAEE5E019B8F64BBF7A780616CF96F9E669914F99F6464184B70104BEED3C07`.
+- Installation boundary: the game remained open, so the rebuilt DLL was not
+  copied over the loaded live DLL. YangYang `mod.ini` was not edited. Install
+  and user-driven F7 runtime acceptance remain pending after the game exits.
+
 ## 2026-08-20 - Current-model pathless VB family selection
 
 - Purpose: remove Path and agent dependencies from normal VB0, Component, and

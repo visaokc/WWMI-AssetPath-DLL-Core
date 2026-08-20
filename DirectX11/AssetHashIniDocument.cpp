@@ -2326,6 +2326,16 @@ CollectVbHashIniSignatures(const std::wstring& source)
 	return signatures;
 }
 
+std::set<std::pair<uint32_t, uint32_t>>
+CollectVbHashIniDrawSignatures(const std::wstring& source)
+{
+	std::set<std::pair<uint32_t, uint32_t>> signatures;
+	for (const auto& signature : CollectVbHashIniSignatures(source)) {
+		signatures.insert({std::get<1>(signature), std::get<2>(signature)});
+	}
+	return signatures;
+}
+
 std::set<uint32_t> CollectShapeKeyHashIniCandidates(
 	const std::wstring& source)
 {
