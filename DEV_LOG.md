@@ -12,23 +12,30 @@
   earlier partial write, and the later target observations included additional
   draws, so no second old-to-new VB replacement was constructed. The complete
   ShapeKey pair therefore had no family anchor.
-- Fix: when the target-only observation set has exactly one VB hash and one
-  native vertex count matching an INI primary host hash, that already-current
-  VB now anchors ShapeKey association directly. No repeat VB text replacement
-  is required. The atomic incomplete-pair gate remains active.
-- Verification: a regression test covers an already-current VB whose observed
-  draw signature cannot create a replacement mapping, and requires both
-  ShapeKey hashes to update through the direct target anchor. All native and
-  static contract tests passed; `Release|x64` rebuilt with 212 pre-existing
-  warnings and zero errors. DLL SHA256 is
-  `5AB7A68CAAAEA0168E61BCE1404D81A7885DFFEA193664233FFB75921597A5DE`.
+- Runtime correction: the first direct-anchor build still left the INI
+  byte-identical even though diagnostics again captured the exact target VB,
+  vertex count, and ShapeKey pair. Pre-lock VB observations remain in the
+  session list, so requiring global uniqueness across that list rejected the
+  already-current host.
+- Fix: after the current target INI resolves its primary host hash, direct
+  ShapeKey association now considers only observations whose VB hash equals
+  that host. Exactly one native vertex count must remain within that host;
+  unrelated pre-lock character observations no longer block it. No repeat VB
+  text replacement is required. The atomic incomplete-pair gate remains active.
+- Verification: the regression now includes an unrelated pre-lock VB hash and
+  vertex count while requiring both ShapeKey hashes to update through the
+  already-current host. All native and static contract tests passed;
+  `Release|x64` rebuilt with 212 pre-existing warnings and zero errors. DLL
+  SHA256 is
+  `935258DE0DA62D29A5DC39964C9C77E99D39C91E22C247A4C205783DC28C0B2D`.
 - Installation: after confirming the game process was absent, the rebuilt DLL
   was copied to `D:\WWMI\d3d11.dll`; its SHA256 matches the verified build.
   The previous DLL, `d3dx.ini`, and the obsolete-ShapeKey YangYang test INI
   were backed up under
   `D:\WWMI\Backups\AlreadyCurrentVbShapeKey-20260820-114647`. Both INI files
-  remained byte-identical during installation. F7 runtime acceptance remains
-  pending.
+  remained byte-identical during installation. That installed build exposed
+  the pre-lock observation rejection above; the corrected DLL is built but is
+  not installed while the game is open. F7 runtime acceptance remains pending.
 
 ## 2026-08-20 - ShapeKey capture diagnostics and atomic repair gate
 
