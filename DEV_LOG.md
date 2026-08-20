@@ -1,5 +1,40 @@
 # DEV_LOG
 
+## 2026-08-20 - First-pass Path-to-VB observation retention
+
+- Symptom: `D:\WWMI\Mods\YangYang\mod.ini` gained valid generated Path
+  blocks in Aggressive F7 mode, but VB0, Component ranges, and ShapeKey Hashes
+  all remained unchanged.
+- Root cause: `ObserveVbHashForAuthoring()` accepted only Paths already present
+  in `watched_identities` when F7 started. On a legacy-Hash-only INI, the draw
+  probe ran before the writer generated its Path, rejected the VB observation,
+  and then deduplicated that draw signature for the rest of the session.
+- Fix: retain bounded Path/VB draw observations during the active F7 session.
+  `TransformVbHashIniDocument()` still consumes only Paths present in the
+  transformed target document, so unrelated runtime Paths cannot create an INI
+  replacement. The existing 65,536-observation cap, per-signature probe
+  deduplication, ambiguity rejection, and capture-off atomic fast path remain.
+- Regression: added a first-pass integration test that starts from a legacy
+  texture Hash section, generates a Path, and repairs the linked VB family in
+  the same transform pass. Native document, Draw Debug gate, and release INI
+  contract tests pass. `Release|x64` rebuilt with 212 pre-existing warnings and
+  zero errors; DLL SHA256 is
+  `8950D153D5A533D1EC64C8C29B47BDB2BE15BAF92EB90664433150DC79AC2992`.
+- Real fixture check: the YangYang document exposes one linked VB family
+  (`15fb50a9`), and an offline replay with the reported current Component and
+  ShapeKey observations updated all requested fields. The prior assumption
+  that `if $object_detected` was not recognized was disproved; the existing
+  variable scanner already treats it as the consumer of
+  `$object_detected = 1`.
+- Files: `DirectX11/AssetHashCapture.cpp`,
+  `tests/asset_hash_ini_document_tests.cpp`, and `README.md`.
+- Installation: after WuWa exited, the rebuilt DLL was installed at
+  `D:\WWMI\d3d11.dll` and read back with the same SHA256. The previous DLL,
+  live `d3dx.ini`, and current YangYang `mod.ini` were backed up under
+  `D:\WWMI\Backups\FirstPassVbRepair-20260820-014819`; neither INI was edited
+  during installation. Runtime acceptance remains pending until YangYang is
+  tested again.
+
 ## 2026-08-20 - Path-gated ShapeKey and Component range repair
 
 - Purpose: extend all four F7 authoring modes beyond VB0 replacement so a

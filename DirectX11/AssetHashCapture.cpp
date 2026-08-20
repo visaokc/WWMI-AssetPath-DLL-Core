@@ -1106,12 +1106,9 @@ void ObserveVbHashForAuthoring(
 	if (asset_path.empty() || asset_path.size() > kMaxIdentityCharacters ||
 			!hash || !index_count)
 		return;
-	const std::wstring path_key =
-		IdentityKey(L"match_asset_path", asset_path);
 	bool changed = false;
 	AcquireSRWLockExclusive(&capture_lock);
 	if (capture_mode != CaptureMode::Off &&
-			watched_identities.find(path_key) != watched_identities.end() &&
 			captured_vb_hashes.size() < kMaxVbHashObservations) {
 		auto key = std::make_tuple(
 			Lower(asset_path),

@@ -749,6 +749,42 @@ void TestVbHashReplacementUsesPathGroupAndCompleteDrawSignature()
 		"VB0 replacement must not add or remove Path comments or markers");
 }
 
+void TestFirstPassGeneratedPathCanRepairVbFamily()
+{
+	const std::wstring source =
+		L"[TextureOverrideComponent0]\r\n"
+		L"hash = aaaaaaaa\r\n"
+		L"match_first_index = 0\r\n"
+		L"match_index_count = 100\r\n"
+		L"$object_detected = 1\r\n"
+		L"\r\n[TextureOverrideLegacyTexture]\r\n"
+		L"hash = 01010101\r\n"
+		L"if $object_detected\r\n"
+		L"    this = ResourceTexture\r\n"
+		L"endif\r\n";
+	const AssetHashPathIdentityMap legacy_identities = {
+		{0x01010101, {
+			L"/Game/Test/Body.Body",
+			{{0x01010101, 1024, 1024}}}}};
+	const std::wstring with_path = TransformAssetHashIniDocument(
+		source,
+		L"",
+		{},
+		legacy_identities,
+		{},
+		L"test");
+	const VbHashObservationList observations = {
+		{L"/Game/Test/Body.Body", 0x11111111, 0, 100, 1000}};
+	const std::wstring updated =
+		TransformVbHashIniDocument(with_path, observations);
+	Require(
+		updated.find(L"match_asset_path = /Game/Test/Body.Body") !=
+				std::wstring::npos &&
+		updated.find(L"hash = 11111111") != std::wstring::npos &&
+		updated.find(L"hash = aaaaaaaa") == std::wstring::npos,
+		"a Path generated during the current F7 pass must repair its VB family");
+}
+
 void TestVbHashReplacementRejectsAmbiguity()
 {
 	const std::wstring source = VbSourceDocument();
@@ -894,6 +930,7 @@ int main()
 	TestShortIdentityAliasesCanonicalize();
 	TestGeneratedSectionsUseCanonicalNames();
 	TestVbHashReplacementUsesPathGroupAndCompleteDrawSignature();
+	TestFirstPassGeneratedPathCanRepairVbFamily();
 	TestVbHashReplacementRejectsAmbiguity();
 	TestVbRangeAndShapeKeyReplacementUsesUniqueStructure();
 	TestVbRangeReplacementRejectsTwoContiguousCandidates();
