@@ -34,8 +34,11 @@
   were backed up under
   `D:\WWMI\Backups\AlreadyCurrentVbShapeKey-20260820-114647`. Both INI files
   remained byte-identical during installation. That installed build exposed
-  the pre-lock observation rejection above; the corrected DLL is built but is
-  not installed while the game is open. F7 runtime acceptance remains pending.
+  the pre-lock observation rejection above. After the next game exit, the
+  corrected DLL was installed and verified; the replaced DLL plus unchanged
+  INIs were backed up under
+  `D:\WWMI\Backups\HostFilteredShapeKey-20260820-131133`. F7 runtime acceptance
+  remains pending.
 
 ## 2026-08-20 - ShapeKey capture diagnostics and atomic repair gate
 
