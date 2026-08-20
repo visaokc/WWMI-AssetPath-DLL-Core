@@ -29,9 +29,12 @@
   passed. `Release|x64` rebuilt with 212 pre-existing warnings and zero errors;
   DLL SHA256 is
   `CFAEE5E019B8F64BBF7A780616CF96F9E669914F99F6464184B70104BEED3C07`.
-- Installation boundary: the game remained open, so the rebuilt DLL was not
-  copied over the loaded live DLL. YangYang `mod.ini` was not edited. Install
-  and user-driven F7 runtime acceptance remain pending after the game exits.
+- Installation: after WuWa exited, the rebuilt DLL was installed and read back
+  at `D:\WWMI\d3d11.dll` with the build SHA256. The previous DLL and unchanged
+  live INIs were backed up under
+  `D:\WWMI\Backups\NativeVbIdentity-20260820-093550`; live `d3dx.ini` and
+  YangYang `mod.ini` remained byte-identical. User-driven F7 runtime acceptance
+  remains pending.
 
 ## 2026-08-20 - Current-model pathless VB family selection
 
