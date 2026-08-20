@@ -1,5 +1,38 @@
 # DEV_LOG
 
+## 2026-08-20 - First-frame ShapeKey observation retention
+
+- Symptom: the current-model selector correctly updated YangYang VB0 to
+  `efd45ce3` and repaired C4-C6 ranges, but left ShapeKey offsets/scale at
+  their obsolete hashes. The Component overrides then redirected VB0 to an
+  uninitialized `ResourceShapeKeyedPosition`, collapsing the visible model.
+- Runtime proof: FrameAnalysis showed all seven updated
+  `[TextureOverride\YY\Component*]` sections matching successfully, while the
+  loader/multiplier resources were already bound as offsets `1a646636` and
+  scale `6fe81411` before the first character draw selected the target INI.
+  Their dispatch sizes also agree with the selected native count `65173`:
+  offsets use `ceil(65173 * 24 / 256) = 6110` groups and scale uses
+  `ceil(65173 / 64) = 1019` groups.
+- Root cause: ShapeKey probing was gated on the target profile and native
+  vertex count. Both become available only after draw-family selection, so
+  ShapeKey Dispatches occurring earlier in the frame were discarded and could
+  not participate in the first write.
+- Fix: during any F7 capture mode, WWMI loader/multiplier resources are now
+  retained once per `(resource hash, filter role)` from session start. The
+  target-only transformer still applies the native vertex-count, stage, slot,
+  UAV, uniqueness, and old-root association checks after model selection.
+- Performance: capture OFF is unchanged. Capture ON adds only the already
+  bounded and deduplicated loader/multiplier probes; no general compute-resource
+  scan or cross-INI ShapeKey write was enabled.
+- Verification: native document, Draw Debug gate, unrestricted agent control,
+  release INI contract, and `git diff --check` passed. `Release|x64` rebuilt
+  with 212 pre-existing warnings and zero errors; DLL SHA256 is
+  `F414F008F2374D2AF2893AB9F57DEF807EAB8B7F03ACDB2BA724C9ADBDCD16A6`.
+- Installation boundary: WuWa remained open, so this DLL was not copied over
+  the currently loaded live DLL. The damaged live Mod was inspected but not
+  manually repaired; installation and user-driven F7 acceptance remain
+  pending after game exit.
+
 ## 2026-08-20 - Native VB identity correction
 
 - Symptom: all four F7 modes generated Path state but never selected the

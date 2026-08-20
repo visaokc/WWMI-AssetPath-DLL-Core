@@ -1195,9 +1195,6 @@ void ObserveShapeKeyHashForAuthoring(
 	bool changed = false;
 	AcquireSRWLockExclusive(&capture_lock);
 	if (capture_mode != CaptureMode::Off &&
-			target_vertex_count &&
-			(byte_width == static_cast<uint64_t>(target_vertex_count) * 24 ||
-			 byte_width == static_cast<uint64_t>(target_vertex_count) * 4) &&
 			captured_shape_key_hashes.size() < kMaxVbHashObservations) {
 		auto key = std::make_tuple(
 			hash,
@@ -1344,7 +1341,6 @@ bool AssetHashCaptureNeedsShapeKeyObservation(
 {
 	AcquireSRWLockExclusive(&capture_lock);
 	bool needed = capture_mode != CaptureMode::Off &&
-		!watched_shape_key_hashes.empty() &&
 		shape_key_probe_keys.insert({hash, filter_index}).second;
 	ReleaseSRWLockExclusive(&capture_lock);
 	return needed;
