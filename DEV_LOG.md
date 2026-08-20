@@ -54,8 +54,13 @@
   `D:\WWMI\Backups\ImmediateTargetWake-20260820-134637`. The authoritative
   selected-target build was installed after the next game exit, with unchanged
   INIs backed up at
-  `D:\WWMI\Backups\SelectedTargetVertexCount-20260820-140515`. F7 runtime
-  acceptance remains pending.
+  `D:\WWMI\Backups\SelectedTargetVertexCount-20260820-140515`.
+- Runtime acceptance: with YangYang already current, Alt+F7 locked
+  `efd45ce3 / 65173`, captured only the exact offsets/scale pair, and updated
+  the live INI without a character switch. Diff against the installation
+  backup contains exactly four replacements: three offsets hashes to
+  `1a646636` and one scale hash to `6fe81411`; VB0 and all Component ranges are
+  unchanged. In-game visual acceptance after reload remains pending.
 
 ## 2026-08-20 - ShapeKey capture diagnostics and atomic repair gate
 
