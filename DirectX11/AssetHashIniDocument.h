@@ -85,7 +85,9 @@ std::wstring TransformVbHashIniDocument(
 	const std::wstring& source,
 	const VbHashObservationList& observations,
 	const ShapeKeyHashObservationList& shape_key_observations = {},
-	bool allow_pathless_observations = false);
+	bool allow_pathless_observations = false,
+	uint32_t selected_target_hash = 0,
+	uint32_t selected_target_vertex_count = 0);
 
 std::set<uint32_t> CollectVbHashIniCandidates(
 	const std::wstring& source);

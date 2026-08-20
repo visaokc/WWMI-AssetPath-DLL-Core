@@ -943,6 +943,7 @@ void TestShapeKeyReplacementUsesAlreadyCurrentTargetVb()
 		L"hash = 81378bbb\r\n";
 	const VbHashObservationList vb_observations = {
 		{L"", 0xbbbbbbbb, 10, 20, 2000},
+		{L"", 0xaaaaaaaa, 998, 1, 2000},
 		{L"", 0xaaaaaaaa, 999, 1, 1000}};
 	const ShapeKeyHashObservationList shape_observations = {
 		{0x1a646636, 24000, 0, 3333, 0, true},
@@ -950,7 +951,12 @@ void TestShapeKeyReplacementUsesAlreadyCurrentTargetVb()
 		{0x6fe81411, 4000, 0, 3333, 1, true},
 		{0x6fe81411, 4000, 0, 4444, 1, true}};
 	const std::wstring updated = TransformVbHashIniDocument(
-		source, vb_observations, shape_observations, true);
+		source,
+		vb_observations,
+		shape_observations,
+		true,
+		0xaaaaaaaa,
+		1000);
 	Require(
 		Count(updated, L"hash = 1a646636") == 1 &&
 		Count(updated, L"hash = 6fe81411") == 1 &&

@@ -631,6 +631,8 @@ void WriteSnapshot(
 	const AssetHashPathIdentityMap& legacy_hash_identities,
 	const std::set<uint32_t>& ambiguous_hashes,
 	const std::wstring& target_source,
+	uint32_t selected_target_hash,
+	uint32_t selected_target_vertex_count,
 	CaptureMode mode)
 {
 	static const std::wstring game_version = []() {
@@ -682,7 +684,9 @@ void WriteSnapshot(
 				transformed,
 				vb_observations,
 				shape_key_observations,
-				true);
+				true,
+				selected_target_hash,
+				selected_target_vertex_count);
 		}
 		if (transformed == previous)
 			continue;
@@ -727,6 +731,8 @@ DWORD WINAPI CaptureWriterThread(void *)
 		AssetHashPathIdentityMap legacy_hash_identities;
 		std::set<uint32_t> ambiguous_hashes;
 		std::wstring target_source;
+		uint32_t selected_target_hash = 0;
+		uint32_t selected_target_vertex_count = 0;
 		CaptureMode mode = CaptureMode::Off;
 		AcquireSRWLockExclusive(&capture_lock);
 		if (capture_mode == CaptureMode::Off || !capture_dirty) {
@@ -740,6 +746,8 @@ DWORD WINAPI CaptureWriterThread(void *)
 		vb_observations = captured_vb_hashes;
 		shape_key_observations = captured_shape_key_hashes;
 		target_source = target_source_file;
+		selected_target_hash = target_vb_hash;
+		selected_target_vertex_count = target_vertex_count;
 		PruneReleasedRecentAssets(GetTickCount64());
 		legacy_hash_identities = BuildLegacyHashIdentitySnapshot();
 		ambiguous_hashes = BuildAmbiguousHashSnapshot();
@@ -755,6 +763,8 @@ DWORD WINAPI CaptureWriterThread(void *)
 			legacy_hash_identities,
 			ambiguous_hashes,
 			target_source,
+			selected_target_hash,
+			selected_target_vertex_count,
 			mode);
 	}
 }

@@ -27,14 +27,19 @@
   now marks the snapshot dirty and explicitly wakes the writer after releasing
   the capture lock, rather than depending on a later character switch or a new
   unique observation to generate another wakeup.
-- Verification: the regression now includes an unrelated pre-lock VB hash and
-  vertex count while requiring both ShapeKey hashes to update through the
-  already-current host. A static contract also requires target selection to
-  dirty and wake the writer outside the capture lock. All native and static
-  contract tests passed;
+- Selected-target authority: the no-switch runtime reached the writer but the
+  same target VB hash had multiple vertex-count deductions across 65 draw
+  observations. The transformer no longer re-infers this value from the noisy
+  list. The selected target hash and its already-resolved native vertex count
+  are copied into the snapshot and used directly for the matching primary host.
+- Verification: the regression now includes both an unrelated pre-lock VB and
+  conflicting vertex-count deductions for the selected host while requiring
+  both ShapeKey hashes to update through the authoritative target count. A
+  static contract also requires target selection to dirty and wake the writer
+  outside the capture lock. All native and static contract tests passed;
   `Release|x64` rebuilt with 212 pre-existing warnings and zero errors. DLL
   SHA256 is
-  `1DE61412FC4A6EBB7AFDF8A27FC37BF5D9C6F56343E3E2820AB25AF8EACD9873`.
+  `A8C19ECFF40AC03A487D0C9687AF32096DF991D7ED3C62904BEF8E5DDC941CB1`.
 - Installation: after confirming the game process was absent, the rebuilt DLL
   was copied to `D:\WWMI\d3d11.dll`; its SHA256 matches the verified build.
   The previous DLL, `d3dx.ini`, and the obsolete-ShapeKey YangYang test INI
@@ -46,8 +51,11 @@
   INIs were backed up under
   `D:\WWMI\Backups\HostFilteredShapeKey-20260820-131133`. The no-switch writer
   wakeup build was then installed with another unchanged-INI backup at
-  `D:\WWMI\Backups\ImmediateTargetWake-20260820-134637`. F7 runtime acceptance
-  remains pending.
+  `D:\WWMI\Backups\ImmediateTargetWake-20260820-134637`. The authoritative
+  selected-target build was installed after the next game exit, with unchanged
+  INIs backed up at
+  `D:\WWMI\Backups\SelectedTargetVertexCount-20260820-140515`. F7 runtime
+  acceptance remains pending.
 
 ## 2026-08-20 - ShapeKey capture diagnostics and atomic repair gate
 

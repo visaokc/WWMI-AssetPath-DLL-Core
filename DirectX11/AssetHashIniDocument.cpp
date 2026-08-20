@@ -1645,7 +1645,9 @@ std::wstring TransformVbHashIniDocument(
 	const std::wstring& source,
 	const VbHashObservationList& observations,
 	const ShapeKeyHashObservationList& shape_key_observations,
-	bool allow_pathless_observations)
+	bool allow_pathless_observations,
+	uint32_t selected_target_hash,
+	uint32_t selected_target_vertex_count)
 {
 	std::vector<std::wstring> lines = SplitLines(source);
 	std::map<std::wstring, std::set<std::wstring>> path_variables;
@@ -2069,7 +2071,10 @@ std::wstring TransformVbHashIniDocument(
 		}
 		auto family = replacements.find({roots.first.first, host_hash});
 		uint64_t vertex_count = 0;
-		if (family != replacements.end()) {
+		if (selected_target_hash == host_hash &&
+				selected_target_vertex_count) {
+			vertex_count = selected_target_vertex_count;
+		} else if (family != replacements.end()) {
 			vertex_count = family->second.vertex_count;
 		} else {
 			std::set<uint32_t> host_vertex_counts;
