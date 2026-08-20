@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 #include <algorithm>
+#include <atomic>
 #include <fstream>
 #include <set>
 #include <string>
@@ -39,18 +40,26 @@ SRWLOCK capture_lock = SRWLOCK_INIT;
 HANDLE capture_event = nullptr;
 LONG worker_started = 0;
 CaptureMode capture_mode = CaptureMode::Off;
+std::atomic<bool> capture_enabled(false);
 bool capture_dirty = false;
 DWORD status_until = 0;
 std::vector<std::wstring> source_files;
 std::set<std::wstring> watched_identities;
 std::set<uint32_t> watched_legacy_hashes;
 std::set<uint32_t> watched_vb_hashes;
+std::set<std::tuple<uint32_t, uint32_t, uint32_t>> watched_vb_signatures;
+std::set<uint32_t> watched_shape_key_hashes;
 std::set<std::tuple<uint32_t, uint32_t, uint32_t>> vb_probe_keys;
+std::set<std::pair<uint32_t, uint32_t>> shape_key_probe_keys;
 AssetHashObservationMap captured_hashes;
 size_t captured_observation_count = 0;
 VbHashObservationList captured_vb_hashes;
-std::set<std::tuple<std::wstring, uint32_t, uint32_t, uint32_t>>
+std::set<std::tuple<std::wstring, uint32_t, uint32_t, uint32_t, uint32_t>>
 	captured_vb_hash_keys;
+ShapeKeyHashObservationList captured_shape_key_hashes;
+std::set<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, bool>>
+	captured_shape_key_hash_keys;
+bool shape_key_repair_armed = false;
 std::map<std::wstring, std::wstring> observed_name_paths;
 std::set<std::wstring> ambiguous_names;
 
@@ -73,7 +82,11 @@ void ResetCaptureSessionLocked()
 	captured_observation_count = 0;
 	captured_vb_hashes.clear();
 	captured_vb_hash_keys.clear();
+	captured_shape_key_hashes.clear();
+	captured_shape_key_hash_keys.clear();
 	vb_probe_keys.clear();
+	shape_key_probe_keys.clear();
+	shape_key_repair_armed = false;
 	observed_name_paths.clear();
 	ambiguous_names.clear();
 	recent_assets.clear();
@@ -596,6 +609,7 @@ void WriteSnapshot(
 	const std::vector<std::wstring>& sources,
 	const AssetHashObservationMap& observations,
 	const VbHashObservationList& vb_observations,
+	const ShapeKeyHashObservationList& shape_key_observations,
 	const AssetHashPathIdentityMap& legacy_hash_identities,
 	const std::set<uint32_t>& ambiguous_hashes,
 	CaptureMode mode)
@@ -645,7 +659,8 @@ void WriteSnapshot(
 				game_version);
 		transformed = TransformVbHashIniDocument(
 			transformed,
-			vb_observations);
+			vb_observations,
+			shape_key_observations);
 		if (transformed == previous)
 			continue;
 		if (!AtomicWriteUtf8(output_path, transformed)) {
@@ -666,6 +681,7 @@ DWORD WINAPI CaptureWriterThread(void *)
 		std::vector<std::wstring> sources;
 		AssetHashObservationMap observations;
 		VbHashObservationList vb_observations;
+		ShapeKeyHashObservationList shape_key_observations;
 		AssetHashPathIdentityMap legacy_hash_identities;
 		std::set<uint32_t> ambiguous_hashes;
 		CaptureMode mode = CaptureMode::Off;
@@ -679,6 +695,7 @@ DWORD WINAPI CaptureWriterThread(void *)
 		sources = source_files;
 		observations = captured_hashes;
 		vb_observations = captured_vb_hashes;
+		shape_key_observations = captured_shape_key_hashes;
 		PruneReleasedRecentAssets(GetTickCount64());
 		legacy_hash_identities = BuildLegacyHashIdentitySnapshot();
 		ambiguous_hashes = BuildAmbiguousHashSnapshot();
@@ -690,6 +707,7 @@ DWORD WINAPI CaptureWriterThread(void *)
 			sources,
 			observations,
 			vb_observations,
+			shape_key_observations,
 			legacy_hash_identities,
 			ambiguous_hashes,
 			mode);
@@ -801,6 +819,7 @@ void ToggleAssetHashCapture(HackerDevice *, void *)
 		capture_mode = CaptureMode::Off;
 	}
 	mode = capture_mode;
+	capture_enabled.store(mode != CaptureMode::Off, std::memory_order_release);
 	if (mode == CaptureMode::Off)
 		capture_dirty = false;
 	status_until = GetTickCount() + 2500;
@@ -834,6 +853,7 @@ void ToggleAggressiveAssetHashCapture(HackerDevice *, void *)
 		capture_mode = CaptureMode::Aggressive;
 	}
 	mode = capture_mode;
+	capture_enabled.store(mode != CaptureMode::Off, std::memory_order_release);
 	if (mode == CaptureMode::Off)
 		capture_dirty = false;
 	status_until = GetTickCount() + 2500;
@@ -867,6 +887,7 @@ void ToggleAssetHashPathConversion(HackerDevice *, void *)
 		capture_mode = CaptureMode::PathConversion;
 	}
 	mode = capture_mode;
+	capture_enabled.store(mode != CaptureMode::Off, std::memory_order_release);
 	if (mode == CaptureMode::Off)
 		capture_dirty = false;
 	status_until = GetTickCount() + 2500;
@@ -900,6 +921,7 @@ void ToggleAssetHashCleanPathConversion(HackerDevice *, void *)
 		capture_mode = CaptureMode::CleanPathConversion;
 	}
 	mode = capture_mode;
+	capture_enabled.store(mode != CaptureMode::Off, std::memory_order_release);
 	if (mode == CaptureMode::Off)
 		capture_dirty = false;
 	status_until = GetTickCount() + 2500;
@@ -928,6 +950,8 @@ void RefreshAssetHashCaptureSources()
 	std::set<std::wstring> identities;
 	std::set<uint32_t> legacy_hashes;
 	std::set<uint32_t> vb_hashes;
+	std::set<std::tuple<uint32_t, uint32_t, uint32_t>> vb_signatures;
+	std::set<uint32_t> shape_key_hashes;
 	bool has_identity_aliases = false;
 	bool needs_canonicalization = false;
 	for (const std::wstring& file : files) {
@@ -953,6 +977,14 @@ void RefreshAssetHashCaptureSources()
 		std::set<uint32_t> found_vb_hashes =
 			CollectVbHashIniCandidates(document);
 		vb_hashes.insert(found_vb_hashes.begin(), found_vb_hashes.end());
+		std::set<std::tuple<uint32_t, uint32_t, uint32_t>>
+			found_vb_signatures = CollectVbHashIniSignatures(document);
+		vb_signatures.insert(
+			found_vb_signatures.begin(), found_vb_signatures.end());
+		std::set<uint32_t> found_shape_key_hashes =
+			CollectShapeKeyHashIniCandidates(document);
+		shape_key_hashes.insert(
+			found_shape_key_hashes.begin(), found_shape_key_hashes.end());
 	}
 
 	AcquireSRWLockExclusive(&capture_lock);
@@ -960,6 +992,8 @@ void RefreshAssetHashCaptureSources()
 	watched_identities = std::move(identities);
 	watched_legacy_hashes = std::move(legacy_hashes);
 	watched_vb_hashes = std::move(vb_hashes);
+	watched_vb_signatures = std::move(vb_signatures);
+	watched_shape_key_hashes = std::move(shape_key_hashes);
 	for (auto i = captured_hashes.begin();
 			i != captured_hashes.end();) {
 		if (watched_identities.find(i->first) ==
@@ -1066,7 +1100,8 @@ void ObserveVbHashForAuthoring(
 	const std::wstring& asset_path,
 	uint32_t hash,
 	uint32_t first_index,
-	uint32_t index_count)
+	uint32_t index_count,
+	uint32_t vertex_count)
 {
 	if (asset_path.empty() || asset_path.size() > kMaxIdentityCharacters ||
 			!hash || !index_count)
@@ -1082,13 +1117,53 @@ void ObserveVbHashForAuthoring(
 			Lower(asset_path),
 			hash,
 			first_index,
-			index_count);
+			index_count,
+			vertex_count);
 		if (captured_vb_hash_keys.insert(key).second) {
 			captured_vb_hashes.push_back({
 				asset_path,
 				hash,
 				first_index,
-				index_count});
+				index_count,
+				vertex_count});
+			capture_dirty = true;
+			changed = true;
+		}
+	}
+	ReleaseSRWLockExclusive(&capture_lock);
+	if (changed)
+		SignalWriter();
+}
+
+void ObserveShapeKeyHashForAuthoring(
+	uint32_t hash,
+	uint32_t byte_width,
+	uint32_t structure_byte_stride,
+	uint32_t filter_index,
+	uint32_t slot,
+	bool unordered_access)
+{
+	if (!hash || !byte_width)
+		return;
+	bool changed = false;
+	AcquireSRWLockExclusive(&capture_lock);
+	if (capture_mode != CaptureMode::Off &&
+			captured_shape_key_hashes.size() < kMaxVbHashObservations) {
+		auto key = std::make_tuple(
+			hash,
+			byte_width,
+			structure_byte_stride,
+			filter_index,
+			slot,
+			unordered_access);
+		if (captured_shape_key_hash_keys.insert(key).second) {
+			captured_shape_key_hashes.push_back({
+				hash,
+				byte_width,
+				structure_byte_stride,
+				filter_index,
+				slot,
+				unordered_access});
 			capture_dirty = true;
 			changed = true;
 		}
@@ -1130,10 +1205,7 @@ bool AssetHashCaptureStatusVisible()
 
 bool AssetHashCaptureEnabled()
 {
-	AcquireSRWLockShared(&capture_lock);
-	bool enabled = capture_mode != CaptureMode::Off;
-	ReleaseSRWLockShared(&capture_lock);
-	return enabled;
+	return capture_enabled.load(std::memory_order_acquire);
 }
 
 bool AssetHashCaptureNeedsVbObservation(
@@ -1142,10 +1214,27 @@ bool AssetHashCaptureNeedsVbObservation(
 	uint32_t index_count)
 {
 	AcquireSRWLockExclusive(&capture_lock);
+	const auto key = std::make_tuple(hash, first_index, index_count);
+	const bool known_signature =
+		watched_vb_hashes.find(hash) != watched_vb_hashes.end() &&
+		watched_vb_signatures.find(key) != watched_vb_signatures.end();
 	bool needed = capture_mode != CaptureMode::Off &&
-		watched_vb_hashes.find(hash) == watched_vb_hashes.end() &&
-		vb_probe_keys.insert(
-			std::make_tuple(hash, first_index, index_count)).second;
+		(!known_signature || shape_key_repair_armed) &&
+		vb_probe_keys.insert(key).second;
+	ReleaseSRWLockExclusive(&capture_lock);
+	return needed;
+}
+
+bool AssetHashCaptureNeedsShapeKeyObservation(
+	uint32_t hash,
+	uint32_t filter_index)
+{
+	AcquireSRWLockExclusive(&capture_lock);
+	bool needed = capture_mode != CaptureMode::Off &&
+		!watched_shape_key_hashes.empty() &&
+		shape_key_probe_keys.insert({hash, filter_index}).second;
+	if (needed)
+		shape_key_repair_armed = true;
 	ReleaseSRWLockExclusive(&capture_lock);
 	return needed;
 }

@@ -4,6 +4,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 struct AssetHashObservation
@@ -31,9 +32,22 @@ struct VbHashObservation
 	uint32_t hash;
 	uint32_t first_index;
 	uint32_t index_count;
+	uint32_t vertex_count;
 };
 
 typedef std::vector<VbHashObservation> VbHashObservationList;
+
+struct ShapeKeyHashObservation
+{
+	uint32_t hash;
+	uint32_t byte_width;
+	uint32_t structure_byte_stride;
+	uint32_t filter_index;
+	uint32_t slot;
+	bool unordered_access;
+};
+
+typedef std::vector<ShapeKeyHashObservation> ShapeKeyHashObservationList;
 
 std::set<std::wstring> CollectAssetHashIniIdentities(
 	const std::wstring& document);
@@ -69,7 +83,14 @@ std::wstring TransformAssetHashIniDocumentToCleanPaths(
 
 std::wstring TransformVbHashIniDocument(
 	const std::wstring& source,
-	const VbHashObservationList& observations);
+	const VbHashObservationList& observations,
+	const ShapeKeyHashObservationList& shape_key_observations = {});
 
 std::set<uint32_t> CollectVbHashIniCandidates(
+	const std::wstring& source);
+
+std::set<std::tuple<uint32_t, uint32_t, uint32_t>>
+CollectVbHashIniSignatures(const std::wstring& source);
+
+std::set<uint32_t> CollectShapeKeyHashIniCandidates(
 	const std::wstring& source);

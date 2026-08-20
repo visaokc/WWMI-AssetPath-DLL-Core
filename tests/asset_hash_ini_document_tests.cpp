@@ -765,6 +765,116 @@ void TestVbHashReplacementRejectsAmbiguity()
 			updated.find(L"hash = 33333333") == std::wstring::npos,
 		"two complete new VB0 candidates must leave the old family unchanged");
 }
+
+void TestVbRangeAndShapeKeyReplacementUsesUniqueStructure()
+{
+	const std::wstring source =
+		VbSourceDocument() +
+		L"\r\n[TextureOverrideShapeKeyOffsets_ib0]\r\n"
+		L"hash = 7fe8c94e\r\n"
+		L"override_byte_stride = 24\r\n"
+		L"override_vertex_count = $mesh_vertex_count_ib0\r\n"
+		L"\r\n[TextureOverrideShapeKeyScale_ib0]\r\n"
+		L"hash = 81378bbb\r\n"
+		L"override_byte_stride = 4\r\n"
+		L"override_vertex_count = $mesh_vertex_count_ib0\r\n"
+		L"\r\n[TextureOverrideShapeKeyLoaderCallback_ib0]\r\n"
+		L"hash = 7fe8c94e\r\n"
+		L"if cs == 3381.3333\r\n"
+		L"    handling = skip\r\n"
+		L"endif\r\n"
+		L"\r\n[TextureOverrideShapeKeyMultiplierCallback_ib0]\r\n"
+		L"hash = 7fe8c94e\r\n"
+		L"if cs == 3381.4444\r\n"
+		L"    handling = skip\r\n"
+		L"endif\r\n";
+	const VbHashObservationList vb_observations = {
+		{L"/Game/Test/Body.Body", 0x11111111, 144069, 83268, 1000},
+		{L"/Game/Test/Shared.Shared", 0x11111111, 227337, 34740, 1000}};
+	const ShapeKeyHashObservationList shape_observations = {
+		{0x1a646636, 24000, 0, 3333, 0, true},
+		{0x1a646636, 24000, 0, 4444, 0, true},
+		{0x06fe8141, 4000, 0, 3333, 2, false},
+		{0x06fe8141, 4000, 0, 4444, 2, false}};
+	const std::wstring updated = TransformVbHashIniDocument(
+		source, vb_observations, shape_observations);
+	Require(
+		Count(updated, L"hash = 11111111") == 2 &&
+		updated.find(L"match_first_index = 144069") != std::wstring::npos &&
+		updated.find(L"match_index_count = 83268") != std::wstring::npos &&
+		updated.find(L"match_first_index = 227337") != std::wstring::npos &&
+		updated.find(L"match_index_count = 34740") != std::wstring::npos,
+		"a unique contiguous component sequence must update VB0 and both draw ranges");
+	Require(
+		Count(updated, L"hash = 1a646636") == 3 &&
+		updated.find(L"hash = 7fe8c94e") == std::wstring::npos,
+		"the offsets hash must update every semantic ShapeKey reference");
+	Require(
+		updated.find(L"hash = 06fe8141") != std::wstring::npos &&
+		updated.find(L"hash = 81378bbb") == std::wstring::npos,
+		"the uniquely sized ShapeKey scale buffer must update without markers");
+}
+
+void TestVbRangeReplacementRejectsTwoContiguousCandidates()
+{
+	const VbHashObservationList observations = {
+		{L"/Game/Test/Body.Body", 0x11111111, 1000, 40, 1000},
+		{L"/Game/Test/Shared.Shared", 0x11111111, 1040, 20, 1000},
+		{L"/Game/Test/Body.Body", 0x22222222, 2000, 80, 2000},
+		{L"/Game/Test/Shared.Shared", 0x22222222, 2080, 30, 2000}};
+	const std::wstring updated =
+		TransformVbHashIniDocument(VbSourceDocument(), observations);
+	Require(
+		Count(updated, L"hash = aaaaaaaa") == 2 &&
+		updated.find(L"match_first_index = 0") != std::wstring::npos,
+		"two structurally valid component families must not be guessed by order");
+}
+
+void TestVbRangeReplacementWorksWhenHashIsUnchanged()
+{
+	const VbHashObservationList observations = {
+		{L"/Game/Test/Body.Body", 0xaaaaaaaa, 500, 120, 1000},
+		{L"/Game/Test/Shared.Shared", 0xaaaaaaaa, 620, 60, 1000}};
+	const std::wstring updated =
+		TransformVbHashIniDocument(VbSourceDocument(), observations);
+	Require(
+		Count(updated, L"hash = aaaaaaaa") == 2 &&
+		updated.find(L"match_first_index = 500") != std::wstring::npos &&
+		updated.find(L"match_index_count = 120") != std::wstring::npos &&
+		updated.find(L"match_first_index = 620") != std::wstring::npos &&
+		updated.find(L"match_index_count = 60") != std::wstring::npos,
+		"component ranges must repair even when the VB0 hash itself is unchanged");
+}
+
+void TestShapeKeyReplacementRejectsAmbiguousBufferSize()
+{
+	const std::wstring source =
+		VbSourceDocument() +
+		L"\r\n[TextureOverrideShapeKeyOffsets_ib0]\r\n"
+		L"hash = 7fe8c94e\r\n"
+		L"override_byte_stride = 24\r\n"
+		L"override_vertex_count = $mesh_vertex_count_ib0\r\n"
+		L"\r\n[TextureOverrideShapeKeyScale_ib0]\r\n"
+		L"hash = 81378bbb\r\n"
+		L"override_byte_stride = 4\r\n"
+		L"override_vertex_count = $mesh_vertex_count_ib0\r\n";
+	const VbHashObservationList vb_observations = {
+		{L"/Game/Test/Body.Body", 0xaaaaaaaa, 0, 100, 1000},
+		{L"/Game/Test/Shared.Shared", 0xaaaaaaaa, 100, 50, 1000}};
+	const ShapeKeyHashObservationList shape_observations = {
+		{0x1a646636, 24000, 0, 3333, 0, true},
+		{0x1a646636, 24000, 0, 4444, 0, true},
+		{0x06fe8141, 4000, 0, 3333, 2, false},
+		{0x12345678, 4000, 0, 4444, 3, false}};
+	const std::wstring updated = TransformVbHashIniDocument(
+		source, vb_observations, shape_observations);
+	Require(
+		updated.find(L"hash = 1a646636") != std::wstring::npos &&
+		updated.find(L"hash = 81378bbb") != std::wstring::npos &&
+		updated.find(L"hash = 06fe8141") == std::wstring::npos &&
+		updated.find(L"hash = 12345678") == std::wstring::npos,
+		"two scale-sized buffers must preserve the old scale hash while offsets remain repairable");
+}
 }
 
 int main()
@@ -785,6 +895,10 @@ int main()
 	TestGeneratedSectionsUseCanonicalNames();
 	TestVbHashReplacementUsesPathGroupAndCompleteDrawSignature();
 	TestVbHashReplacementRejectsAmbiguity();
+	TestVbRangeAndShapeKeyReplacementUsesUniqueStructure();
+	TestVbRangeReplacementRejectsTwoContiguousCandidates();
+	TestVbRangeReplacementWorksWhenHashIsUnchanged();
+	TestShapeKeyReplacementRejectsAmbiguousBufferSize();
 	std::cout << "asset_hash_ini_document_tests: PASS\n";
 	return 0;
 }

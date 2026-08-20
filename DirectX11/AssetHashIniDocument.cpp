@@ -1643,7 +1643,8 @@ void AddPathVariables(
 
 std::wstring TransformVbHashIniDocument(
 	const std::wstring& source,
-	const VbHashObservationList& observations)
+	const VbHashObservationList& observations,
+	const ShapeKeyHashObservationList& shape_key_observations)
 {
 	std::vector<std::wstring> lines = SplitLines(source);
 	std::map<std::wstring, std::set<std::wstring>> path_variables;
@@ -1687,6 +1688,7 @@ std::wstring TransformVbHashIniDocument(
 
 	std::vector<VbCandidateSection> candidates;
 	std::map<VbFamilyKey, std::set<VbDrawSignature>> family_signatures;
+	std::map<std::wstring, std::set<uint32_t>> primary_family_hashes;
 	for (size_t i = 0; i < lines.size();) {
 		if (Trim(lines[i]) == kBlockBegin) {
 			while (i < lines.size() && Trim(lines[i]) != kBlockEnd)
@@ -1742,11 +1744,32 @@ std::wstring TransformVbHashIniDocument(
 			VbDrawSignature signature = {first_index, index_count};
 			candidates.push_back({i, end, family, signature});
 			family_signatures[family].insert(signature);
+			std::wstring lowered_name = Lower(section_name);
+			const std::wstring component_prefix =
+				L"textureoverridecomponent";
+			if (lowered_name.find(component_prefix) == 0) {
+				size_t position = component_prefix.size();
+				while (position < lowered_name.size() &&
+						iswdigit(lowered_name[position]))
+					++position;
+				std::wstring variable_suffix;
+				size_t suffix = family.variable.rfind(L"_ib");
+				if (suffix != std::wstring::npos)
+					variable_suffix = family.variable.substr(suffix);
+				if (position > component_prefix.size() &&
+						lowered_name.substr(position) == variable_suffix)
+					primary_family_hashes[family.variable].insert(hash);
+			}
 		}
 		i = end;
 	}
 
-	typedef std::map<uint32_t, std::set<VbDrawSignature>> ObservedHashSignatures;
+	struct ObservedDrawFamily
+	{
+		std::set<VbDrawSignature> signatures;
+		std::set<uint32_t> vertex_counts;
+	};
+	typedef std::map<uint32_t, ObservedDrawFamily> ObservedHashSignatures;
 	std::map<std::wstring, ObservedHashSignatures> observed_signatures;
 	for (const VbHashObservation& observation : observations) {
 		auto path = path_variables.find(Lower(observation.asset_path));
@@ -1756,20 +1779,21 @@ std::wstring TransformVbHashIniDocument(
 			observation.first_index,
 			observation.index_count};
 		for (const std::wstring& variable : path->second) {
-			bool known_signature = false;
-			for (const auto& family : family_signatures) {
-				if (family.first.variable == variable &&
-						family.second.find(signature) != family.second.end()) {
-					known_signature = true;
-					break;
-				}
-			}
-			if (known_signature)
-				observed_signatures[variable][observation.hash].insert(signature);
+			ObservedDrawFamily& family =
+				observed_signatures[variable][observation.hash];
+			family.signatures.insert(signature);
+			if (observation.vertex_count)
+				family.vertex_counts.insert(observation.vertex_count);
 		}
 	}
 
-	std::map<VbFamilyKey, uint32_t> replacements;
+	struct VbFamilyUpdate
+	{
+		uint32_t hash;
+		uint32_t vertex_count;
+		std::map<VbDrawSignature, VbDrawSignature> signatures;
+	};
+	std::map<VbFamilyKey, VbFamilyUpdate> replacements;
 	for (const auto& family : family_signatures) {
 		size_t equivalent_families = 0;
 		for (const auto& other : family_signatures) {
@@ -1783,35 +1807,329 @@ std::wstring TransformVbHashIniDocument(
 		auto variable_observations = observed_signatures.find(family.first.variable);
 		if (variable_observations == observed_signatures.end())
 			continue;
-		uint32_t replacement = 0;
-		size_t matches = 0;
+		std::vector<std::pair<uint32_t, std::vector<VbDrawSignature>>>
+			matches;
 		for (const auto& observed : variable_observations->second) {
-			if (observed.second == family.second) {
-				replacement = observed.first;
-				++matches;
+			if (observed.second.signatures == family.second) {
+				matches.push_back({
+					observed.first,
+					std::vector<VbDrawSignature>(
+						observed.second.signatures.begin(),
+						observed.second.signatures.end())});
+				continue;
+			}
+
+			std::vector<VbDrawSignature> old_signatures(
+				family.second.begin(), family.second.end());
+			size_t same_shape_families = 0;
+			for (const auto& other : family_signatures) {
+				if (other.first.variable != family.first.variable ||
+						other.second.size() != old_signatures.size())
+					continue;
+				bool contiguous = true;
+				VbDrawSignature previous = {};
+				bool has_previous = false;
+				for (const VbDrawSignature& signature : other.second) {
+					if (has_previous &&
+							previous.first_index + previous.index_count !=
+								signature.first_index) {
+						contiguous = false;
+						break;
+					}
+					previous = signature;
+					has_previous = true;
+				}
+				if (contiguous)
+					++same_shape_families;
+			}
+			if (same_shape_families != 1)
+				continue;
+			std::vector<VbDrawSignature> new_signatures(
+				observed.second.signatures.begin(),
+				observed.second.signatures.end());
+			if (old_signatures.size() < 2 ||
+					new_signatures.size() < old_signatures.size())
+				continue;
+			bool old_contiguous = true;
+			for (size_t i = 1; i < old_signatures.size(); ++i) {
+				if (old_signatures[i - 1].first_index +
+						old_signatures[i - 1].index_count !=
+						old_signatures[i].first_index) {
+					old_contiguous = false;
+					break;
+				}
+			}
+			if (!old_contiguous)
+				continue;
+			for (size_t begin = 0;
+					begin + old_signatures.size() <= new_signatures.size();
+					++begin) {
+				bool contiguous = true;
+				for (size_t i = 1; i < old_signatures.size(); ++i) {
+					const VbDrawSignature& previous =
+						new_signatures[begin + i - 1];
+					if (previous.first_index + previous.index_count !=
+							new_signatures[begin + i].first_index) {
+						contiguous = false;
+						break;
+					}
+				}
+				if (contiguous) {
+					matches.push_back({
+						observed.first,
+						std::vector<VbDrawSignature>(
+							new_signatures.begin() + begin,
+							new_signatures.begin() + begin +
+								old_signatures.size())});
+				}
 			}
 		}
-		if (matches == 1)
-			replacements[family.first] = replacement;
+		if (matches.size() != 1)
+			continue;
+		const ObservedDrawFamily& observed =
+			variable_observations->second[matches.front().first];
+		VbFamilyUpdate update = {
+			matches.front().first,
+			observed.vertex_counts.size() == 1
+				? *observed.vertex_counts.begin()
+				: 0,
+			{}};
+		std::vector<VbDrawSignature> old_signatures(
+			family.second.begin(), family.second.end());
+		for (size_t i = 0; i < old_signatures.size(); ++i)
+			update.signatures[old_signatures[i]] = matches.front().second[i];
+		replacements[family.first] = std::move(update);
 	}
 
 	for (const VbCandidateSection& candidate : candidates) {
 		auto replacement = replacements.find(candidate.family);
-		if (replacement == replacements.end() ||
-				replacement->second == candidate.family.old_hash)
+		if (replacement == replacements.end())
 			continue;
 		for (size_t line = candidate.begin + 1; line < candidate.end; ++line) {
 			std::wstring key;
 			std::wstring value;
 			bool commented = false;
-			if (!ParseAssignment(lines[line], &key, &value, &commented) ||
-					commented || key != L"hash")
+			if (!ParseAssignment(lines[line], &key, &value, &commented) || commented)
 				continue;
-			wchar_t hash_text[9];
-			swprintf(hash_text, 9, L"%08x", replacement->second);
-			size_t equals = lines[line].find(L'=');
-			lines[line] = lines[line].substr(0, equals + 1) + L" " + hash_text;
-			break;
+			std::wstring replacement_text;
+			if (key == L"hash" &&
+					replacement->second.hash != candidate.family.old_hash) {
+				wchar_t hash_text[9];
+				swprintf(hash_text, 9, L"%08x", replacement->second.hash);
+				replacement_text = hash_text;
+			} else {
+				auto signature = replacement->second.signatures.find(
+					candidate.signature);
+				if (signature == replacement->second.signatures.end())
+					continue;
+				if (key == L"match_first_index" &&
+						signature->second.first_index !=
+							candidate.signature.first_index)
+					replacement_text = std::to_wstring(
+						signature->second.first_index);
+				else if (key == L"match_index_count" &&
+						signature->second.index_count !=
+							candidate.signature.index_count)
+					replacement_text = std::to_wstring(
+						signature->second.index_count);
+			}
+			if (!replacement_text.empty()) {
+				size_t equals = lines[line].find(L'=');
+				lines[line] = lines[line].substr(0, equals + 1) +
+					L" " + replacement_text;
+			}
+		}
+	}
+
+	struct ShapeKeyResourceState
+	{
+		uint32_t byte_width = 0;
+		uint32_t stages = 0;
+		bool uav0 = false;
+		bool ambiguous_width = false;
+	};
+	std::map<uint32_t, ShapeKeyResourceState> shape_resources;
+	for (const ShapeKeyHashObservation& observation : shape_key_observations) {
+		if (!observation.hash || !observation.byte_width)
+			continue;
+		ShapeKeyResourceState& resource = shape_resources[observation.hash];
+		if (resource.byte_width &&
+				resource.byte_width != observation.byte_width)
+			resource.ambiguous_width = true;
+		else
+			resource.byte_width = observation.byte_width;
+		if (observation.filter_index == 3333)
+			resource.stages |= 1;
+		else if (observation.filter_index == 4444)
+			resource.stages |= 2;
+		if (observation.unordered_access && observation.slot == 0)
+			resource.uav0 = true;
+	}
+
+	struct ShapeKeyRoot
+	{
+		uint32_t old_hash;
+		bool offsets;
+	};
+	std::map<std::pair<std::wstring, uint32_t>, std::vector<ShapeKeyRoot>>
+		shape_roots;
+	auto component_suffix = [](const std::wstring& section_name) {
+		std::wstring lowered = Lower(section_name);
+		size_t suffix = lowered.rfind(L"_ib");
+		if (suffix == std::wstring::npos || suffix + 3 == lowered.size())
+			return std::wstring();
+		for (size_t i = suffix + 3; i < lowered.size(); ++i) {
+			if (!iswdigit(lowered[i]))
+				return std::wstring();
+		}
+		return lowered.substr(suffix);
+	};
+	for (size_t i = 0; i < lines.size();) {
+		std::wstring section_name;
+		if (!ParseSectionHeader(lines[i], &section_name) ||
+				!StartsWithInsensitive(section_name, L"TextureOverride")) {
+			++i;
+			continue;
+		}
+		size_t end = i + 1;
+		std::wstring next_section;
+		while (end < lines.size() &&
+				!ParseSectionHeader(lines[end], &next_section) &&
+				Trim(lines[end]) != kBlockBegin)
+			++end;
+		std::wstring lowered = Lower(section_name);
+		bool offsets = lowered.find(L"shapekeyoffsets") !=
+			std::wstring::npos;
+		bool scale = lowered.find(L"shapekeyscale") !=
+			std::wstring::npos;
+		if (offsets || scale) {
+			const std::wstring token = offsets
+				? L"shapekeyoffsets"
+				: L"shapekeyscale";
+			size_t token_end = lowered.find(token) + token.size();
+			size_t suffix_begin = lowered.rfind(L"_ib");
+			if (suffix_begin == std::wstring::npos)
+				suffix_begin = lowered.size();
+			std::wstring host_suffix = lowered.substr(
+				token_end, suffix_begin - token_end);
+			uint32_t host_hash = 0;
+			if (!host_suffix.empty() &&
+					(host_suffix.size() != 9 || host_suffix.front() != L'_' ||
+					 !ParseHash(host_suffix.substr(1), &host_hash))) {
+				i = end;
+				continue;
+			}
+			uint32_t hash = 0;
+			for (size_t line = i + 1; line < end; ++line) {
+				std::wstring key;
+				std::wstring value;
+				bool commented = false;
+				if (ParseAssignment(lines[line], &key, &value, &commented) &&
+						!commented && key == L"hash" &&
+						ParseHash(value, &hash))
+					break;
+			}
+			if (hash) {
+				std::wstring variable =
+					L"$object_detected" + component_suffix(section_name);
+				shape_roots[{variable, host_hash}].push_back({hash, offsets});
+			}
+		}
+		i = end;
+	}
+
+	std::map<uint32_t, uint32_t> shape_replacements;
+	for (const auto& roots : shape_roots) {
+		uint32_t host_hash = roots.first.second;
+		if (!host_hash) {
+			auto primary = primary_family_hashes.find(roots.first.first);
+			if (primary == primary_family_hashes.end() ||
+					primary->second.size() != 1)
+				continue;
+			host_hash = *primary->second.begin();
+		}
+		auto family = replacements.find({roots.first.first, host_hash});
+		if (family == replacements.end())
+			continue;
+		size_t offsets_roots = 0;
+		size_t scale_roots = 0;
+		uint32_t old_offsets = 0;
+		uint32_t old_scale = 0;
+		for (const ShapeKeyRoot& root : roots.second) {
+			if (root.offsets) {
+				++offsets_roots;
+				old_offsets = root.old_hash;
+			} else {
+				++scale_roots;
+				old_scale = root.old_hash;
+			}
+		}
+		if (offsets_roots != 1 || scale_roots != 1)
+			continue;
+
+		uint32_t current_offsets = 0;
+		uint32_t current_scale = 0;
+		size_t offsets_matches = 0;
+		size_t scale_matches = 0;
+		const uint64_t vertex_count = family->second.vertex_count;
+		for (const auto& resource : shape_resources) {
+			if (resource.second.ambiguous_width ||
+					!resource.second.stages)
+				continue;
+			if (resource.second.uav0 &&
+					resource.second.stages == 3 &&
+					resource.second.byte_width == vertex_count * 24) {
+				current_offsets = resource.first;
+				++offsets_matches;
+			}
+			if (resource.second.byte_width == vertex_count * 4) {
+				current_scale = resource.first;
+				++scale_matches;
+			}
+		}
+		if (offsets_matches == 1 && current_offsets != old_offsets)
+			shape_replacements[old_offsets] = current_offsets;
+		if (scale_matches == 1 && current_scale != old_scale)
+			shape_replacements[old_scale] = current_scale;
+	}
+
+	if (!shape_replacements.empty()) {
+		for (size_t i = 0; i < lines.size();) {
+			std::wstring section_name;
+			if (!ParseSectionHeader(lines[i], &section_name) ||
+					!StartsWithInsensitive(section_name, L"TextureOverride")) {
+				++i;
+				continue;
+			}
+			size_t end = i + 1;
+			std::wstring next_section;
+			while (end < lines.size() &&
+					!ParseSectionHeader(lines[end], &next_section) &&
+					Trim(lines[end]) != kBlockBegin)
+				++end;
+			if (Lower(section_name).find(L"shapekey") == std::wstring::npos) {
+				i = end;
+				continue;
+			}
+			for (size_t line = i + 1; line < end; ++line) {
+				std::wstring key;
+				std::wstring value;
+				bool commented = false;
+				uint32_t hash = 0;
+				if (!ParseAssignment(lines[line], &key, &value, &commented) ||
+						commented || key != L"hash" ||
+						!ParseHash(value, &hash))
+					continue;
+				auto replacement = shape_replacements.find(hash);
+				if (replacement == shape_replacements.end())
+					continue;
+				wchar_t hash_text[9];
+				swprintf(hash_text, 9, L"%08x", replacement->second);
+				size_t equals = lines[line].find(L'=');
+				lines[line] = lines[line].substr(0, equals + 1) +
+					L" " + hash_text;
+			}
+			i = end;
 		}
 	}
 	return JoinLines(lines);
@@ -1905,6 +2223,85 @@ std::set<uint32_t> CollectVbHashIniCandidates(
 		}
 		if (has_hash && has_first_index && has_index_count && has_path_variable)
 			hashes.insert(hash);
+		i = end;
+	}
+	return hashes;
+}
+
+std::set<std::tuple<uint32_t, uint32_t, uint32_t>>
+CollectVbHashIniSignatures(const std::wstring& source)
+{
+	std::vector<std::wstring> lines = SplitLines(source);
+	std::set<std::tuple<uint32_t, uint32_t, uint32_t>> signatures;
+	for (size_t i = 0; i < lines.size();) {
+		std::wstring section_name;
+		if (!ParseSectionHeader(lines[i], &section_name) ||
+				!StartsWithInsensitive(section_name, L"TextureOverride")) {
+			++i;
+			continue;
+		}
+		size_t end = i + 1;
+		std::wstring next_section;
+		while (end < lines.size() &&
+				!ParseSectionHeader(lines[end], &next_section) &&
+				Trim(lines[end]) != kBlockBegin)
+			++end;
+		uint32_t hash = 0;
+		uint32_t first_index = 0;
+		uint32_t index_count = 0;
+		bool has_hash = false;
+		bool has_first_index = false;
+		bool has_index_count = false;
+		for (size_t line = i + 1; line < end; ++line) {
+			std::wstring key;
+			std::wstring value;
+			bool commented = false;
+			if (!ParseAssignment(lines[line], &key, &value, &commented) || commented)
+				continue;
+			if (key == L"hash")
+				has_hash = ParseHash(value, &hash);
+			else if (key == L"match_first_index")
+				has_first_index = ParseDecimal(value, &first_index);
+			else if (key == L"match_index_count")
+				has_index_count = ParseDecimal(value, &index_count);
+		}
+		if (has_hash && has_first_index && has_index_count)
+			signatures.insert({hash, first_index, index_count});
+		i = end;
+	}
+	return signatures;
+}
+
+std::set<uint32_t> CollectShapeKeyHashIniCandidates(
+	const std::wstring& source)
+{
+	std::vector<std::wstring> lines = SplitLines(source);
+	std::set<uint32_t> hashes;
+	for (size_t i = 0; i < lines.size();) {
+		std::wstring section_name;
+		if (!ParseSectionHeader(lines[i], &section_name) ||
+				!StartsWithInsensitive(section_name, L"TextureOverride") ||
+				Lower(section_name).find(L"shapekey") == std::wstring::npos) {
+			++i;
+			continue;
+		}
+		size_t end = i + 1;
+		std::wstring next_section;
+		while (end < lines.size() &&
+				!ParseSectionHeader(lines[end], &next_section) &&
+				Trim(lines[end]) != kBlockBegin)
+			++end;
+		for (size_t line = i + 1; line < end; ++line) {
+			std::wstring key;
+			std::wstring value;
+			bool commented = false;
+			uint32_t hash = 0;
+			if (ParseAssignment(lines[line], &key, &value, &commented) &&
+					!commented && key == L"hash" && ParseHash(value, &hash)) {
+				hashes.insert(hash);
+				break;
+			}
+		}
 		i = end;
 	}
 	return hashes;
