@@ -25,8 +25,12 @@
   release INI contract, and `git diff --check` passed. `Release|x64` rebuilt
   with 212 pre-existing warnings and zero errors; DLL SHA256 is
   `DF32EF04B0CB4016E0B860233FB067A6DD9FBB0AECBE8ABD87580C7414803BBC`.
-- Installation boundary: the game remains open, so the diagnostic/safety DLL
-  is not installed. Runtime diagnosis remains pending after game exit.
+- Installation: after confirming the game process was absent, the
+  diagnostic/safety DLL was copied to `D:\WWMI\d3d11.dll` and its SHA256 was
+  verified. The previous DLL, `d3dx.ini`, and the obsolete-ShapeKey YangYang
+  test INI were backed up under
+  `D:\WWMI\Backups\ShapeKeyDiagnostic-20260820-112612`; neither INI changed
+  during installation. Agent-guided runtime diagnosis remains pending.
 
 ## 2026-08-20 - ShapeKey UAV role correction
 
