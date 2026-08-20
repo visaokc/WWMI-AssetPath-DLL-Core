@@ -74,8 +74,10 @@
   All native/static tests passed; `Release|x64` rebuilt with 212 pre-existing
   warnings and zero errors. DLL SHA256 is
   `095335FB6A88F94C9BA423F81EECBBC84B76D092AECA61B7D10F331CC05E7501`.
-  Installation and repeated-archive runtime acceptance remain pending after
-  game exit.
+  After confirming game exit, the build was installed and verified. The prior
+  DLL plus unchanged configuration and full-old YangYang INI were backed up at
+  `D:\WWMI\Backups\RepeatArchiveRepair-20260820-144242`. Repeated-archive
+  runtime acceptance remains pending.
 
 ## 2026-08-20 - ShapeKey capture diagnostics and atomic repair gate
 
