@@ -24,6 +24,7 @@
 #include "ShaderRegex.h"
 #include "FrameAnalysis.h"
 #include "profiling.h"
+#include "AssetHashCapture.h"
 #include "AssetPathTextureIdentity.h"
 
 // -----------------------------------------------------------------------------------------------
@@ -810,6 +811,50 @@ void HackerContext::BeforeDraw(DrawContext &data)
 		b.is_explicit = false;
 	}
 
+	if (AssetHashCaptureEnabled() && data.call_info.IndexCount) {
+		uint32_t vb0_hash = mCurrentVertexBuffers[0];
+		if (!vb0_hash) {
+			ID3D11Buffer *vb0 = nullptr;
+			UINT stride = 0;
+			UINT offset = 0;
+			mOrigContext1->IAGetVertexBuffers(0, 1, &vb0, &stride, &offset);
+			vb0_hash = vb0 ? GetResourceHash(vb0) : 0;
+			if (vb0)
+				vb0->Release();
+			mCurrentVertexBuffers[0] = vb0_hash;
+		}
+		if (vb0_hash && AssetHashCaptureNeedsVbObservation(
+				vb0_hash,
+				data.call_info.FirstIndex,
+				data.call_info.IndexCount)) {
+			ID3D11ShaderResourceView *views[
+				D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
+			mOrigContext1->PSGetShaderResources(
+				0,
+				D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,
+				views);
+			std::set<std::wstring> observed_paths;
+			for (ID3D11ShaderResourceView *view : views) {
+				if (!view)
+					continue;
+				ID3D11Resource *resource = nullptr;
+				view->GetResource(&resource);
+				std::wstring asset_path;
+				if (GetResourceAssetPath(resource, &asset_path) &&
+						observed_paths.insert(asset_path).second) {
+					ObserveVbHashForAuthoring(
+						asset_path,
+						vb0_hash,
+						data.call_info.FirstIndex,
+						data.call_info.IndexCount);
+				}
+				if (resource)
+					resource->Release();
+				view->Release();
+			}
+		}
+	}
+
 	// If we are not hunting shaders, we should skip all of this shader management for a performance bump.
 	if (G->hunting == HUNTING_MODE_ENABLED)
 	{
@@ -1538,6 +1583,11 @@ STDMETHODIMP_(void) HackerContext::IASetVertexBuffers(THIS_
 	__in_ecount(NumBuffers)  const UINT *pOffsets)
 {
 	 mOrigContext1->IASetVertexBuffers(StartSlot, NumBuffers, ppVertexBuffers, pStrides, pOffsets);
+	 if (AssetHashCaptureEnabled() && StartSlot == 0 && NumBuffers) {
+		 mCurrentVertexBuffers[0] = ppVertexBuffers && ppVertexBuffers[0]
+			 ? GetResourceHash(ppVertexBuffers[0])
+			 : 0;
+	 }
 
 	 // Register hashes of vertex buffers for browsing in Shader Hunting Mode.
 	 if (G->hunting == HUNTING_MODE_ENABLED) {

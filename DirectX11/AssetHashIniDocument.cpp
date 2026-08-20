@@ -1551,3 +1551,361 @@ std::wstring TransformAssetHashIniDocumentToCleanPaths(
 		game_version,
 		true);
 }
+
+namespace
+{
+struct VbDrawSignature
+{
+	uint32_t first_index;
+	uint32_t index_count;
+
+	bool operator<(const VbDrawSignature& other) const
+	{
+		return first_index < other.first_index ||
+			(first_index == other.first_index && index_count < other.index_count);
+	}
+
+	bool operator==(const VbDrawSignature& other) const
+	{
+		return first_index == other.first_index &&
+			index_count == other.index_count;
+	}
+};
+
+struct VbFamilyKey
+{
+	std::wstring variable;
+	uint32_t old_hash;
+
+	bool operator<(const VbFamilyKey& other) const
+	{
+		return variable < other.variable ||
+			(variable == other.variable && old_hash < other.old_hash);
+	}
+};
+
+struct VbCandidateSection
+{
+	size_t begin;
+	size_t end;
+	VbFamilyKey family;
+	VbDrawSignature signature;
+};
+
+bool ParseDecimal(const std::wstring& value, uint32_t *number)
+{
+	wchar_t *end = nullptr;
+	unsigned long parsed = wcstoul(value.c_str(), &end, 10);
+	if (end == value.c_str() || *Trim(end).c_str())
+		return false;
+	*number = static_cast<uint32_t>(parsed);
+	return true;
+}
+
+std::set<std::wstring> ExtractVariables(
+	const std::vector<std::wstring>& lines,
+	size_t begin,
+	size_t end)
+{
+	std::set<std::wstring> variables;
+	for (size_t i = begin; i < end; ++i) {
+		for (size_t offset = 0;
+				(offset = lines[i].find(L'$', offset)) != std::wstring::npos;) {
+			size_t finish = offset + 1;
+			while (finish < lines[i].size() &&
+					(iswalnum(lines[i][finish]) ||
+					 lines[i][finish] == L'_' ||
+					 lines[i][finish] == L'\\'))
+				++finish;
+			if (finish > offset + 1)
+				variables.insert(Lower(lines[i].substr(offset, finish - offset)));
+			offset = finish;
+		}
+	}
+	return variables;
+}
+
+void AddPathVariables(
+	std::map<std::wstring, std::set<std::wstring>> *path_variables,
+	const SectionData& section,
+	const std::vector<std::wstring>& lines,
+	size_t begin,
+	size_t end)
+{
+	if (section.identity_name != L"match_asset_path")
+		return;
+	std::set<std::wstring> variables = ExtractVariables(lines, begin, end);
+	(*path_variables)[Lower(section.identity_value)].insert(
+		variables.begin(),
+		variables.end());
+}
+}
+
+std::wstring TransformVbHashIniDocument(
+	const std::wstring& source,
+	const VbHashObservationList& observations)
+{
+	std::vector<std::wstring> lines = SplitLines(source);
+	std::map<std::wstring, std::set<std::wstring>> path_variables;
+	std::set<std::wstring> referenced_variables;
+
+	for (size_t i = 0; i < lines.size();) {
+		if (Trim(lines[i]) == kBlockBegin) {
+			size_t end = i + 1;
+			while (end < lines.size() && Trim(lines[end]) != kBlockEnd)
+				++end;
+			if (end == lines.size())
+				break;
+			SectionData block = ParseBlock(lines, i, end);
+			AddPathVariables(&path_variables, block, lines, i + 1, end);
+			i = end + 1;
+			continue;
+		}
+
+		std::wstring section_name;
+		if (!ParseSectionHeader(lines[i], &section_name)) {
+			++i;
+			continue;
+		}
+		size_t end = i + 1;
+		std::wstring next_section;
+		while (end < lines.size() &&
+				!ParseSectionHeader(lines[end], &next_section) &&
+				Trim(lines[end]) != kBlockBegin)
+			++end;
+		if (StartsWithInsensitive(section_name, L"TextureOverride")) {
+			SectionData section = ParseSection(lines, i, end);
+			AddPathVariables(&path_variables, section, lines, i + 1, end);
+		}
+		i = end;
+	}
+	for (const auto& path : path_variables) {
+		referenced_variables.insert(
+			path.second.begin(),
+			path.second.end());
+	}
+
+	std::vector<VbCandidateSection> candidates;
+	std::map<VbFamilyKey, std::set<VbDrawSignature>> family_signatures;
+	for (size_t i = 0; i < lines.size();) {
+		if (Trim(lines[i]) == kBlockBegin) {
+			while (i < lines.size() && Trim(lines[i]) != kBlockEnd)
+				++i;
+			if (i < lines.size())
+				++i;
+			continue;
+		}
+		std::wstring section_name;
+		if (!ParseSectionHeader(lines[i], &section_name) ||
+				!StartsWithInsensitive(section_name, L"TextureOverride")) {
+			++i;
+			continue;
+		}
+		size_t end = i + 1;
+		std::wstring next_section;
+		while (end < lines.size() &&
+				!ParseSectionHeader(lines[end], &next_section) &&
+				Trim(lines[end]) != kBlockBegin)
+			++end;
+
+		uint32_t hash = 0;
+		uint32_t first_index = 0;
+		uint32_t index_count = 0;
+		bool has_hash = false;
+		bool has_first_index = false;
+		bool has_index_count = false;
+		std::set<std::wstring> assigned_variables;
+		for (size_t line = i + 1; line < end; ++line) {
+			std::wstring key;
+			std::wstring value;
+			bool commented = false;
+			if (!ParseAssignment(lines[line], &key, &value, &commented) || commented)
+				continue;
+			if (key == L"hash")
+				has_hash = ParseHash(value, &hash);
+			else if (key == L"match_first_index")
+				has_first_index = ParseDecimal(value, &first_index);
+			else if (key == L"match_index_count")
+				has_index_count = ParseDecimal(value, &index_count);
+			else if (!key.empty() && key.front() == L'$' && Trim(value) == L"1")
+				assigned_variables.insert(key);
+		}
+
+		std::vector<std::wstring> family_variables;
+		for (const std::wstring& variable : assigned_variables) {
+			if (referenced_variables.find(variable) != referenced_variables.end())
+				family_variables.push_back(variable);
+		}
+		if (has_hash && has_first_index && has_index_count &&
+				family_variables.size() == 1) {
+			VbFamilyKey family = {family_variables.front(), hash};
+			VbDrawSignature signature = {first_index, index_count};
+			candidates.push_back({i, end, family, signature});
+			family_signatures[family].insert(signature);
+		}
+		i = end;
+	}
+
+	typedef std::map<uint32_t, std::set<VbDrawSignature>> ObservedHashSignatures;
+	std::map<std::wstring, ObservedHashSignatures> observed_signatures;
+	for (const VbHashObservation& observation : observations) {
+		auto path = path_variables.find(Lower(observation.asset_path));
+		if (path == path_variables.end() || !observation.hash)
+			continue;
+		VbDrawSignature signature = {
+			observation.first_index,
+			observation.index_count};
+		for (const std::wstring& variable : path->second) {
+			bool known_signature = false;
+			for (const auto& family : family_signatures) {
+				if (family.first.variable == variable &&
+						family.second.find(signature) != family.second.end()) {
+					known_signature = true;
+					break;
+				}
+			}
+			if (known_signature)
+				observed_signatures[variable][observation.hash].insert(signature);
+		}
+	}
+
+	std::map<VbFamilyKey, uint32_t> replacements;
+	for (const auto& family : family_signatures) {
+		size_t equivalent_families = 0;
+		for (const auto& other : family_signatures) {
+			if (other.first.variable == family.first.variable &&
+					other.second == family.second)
+				++equivalent_families;
+		}
+		if (equivalent_families != 1)
+			continue;
+
+		auto variable_observations = observed_signatures.find(family.first.variable);
+		if (variable_observations == observed_signatures.end())
+			continue;
+		uint32_t replacement = 0;
+		size_t matches = 0;
+		for (const auto& observed : variable_observations->second) {
+			if (observed.second == family.second) {
+				replacement = observed.first;
+				++matches;
+			}
+		}
+		if (matches == 1)
+			replacements[family.first] = replacement;
+	}
+
+	for (const VbCandidateSection& candidate : candidates) {
+		auto replacement = replacements.find(candidate.family);
+		if (replacement == replacements.end() ||
+				replacement->second == candidate.family.old_hash)
+			continue;
+		for (size_t line = candidate.begin + 1; line < candidate.end; ++line) {
+			std::wstring key;
+			std::wstring value;
+			bool commented = false;
+			if (!ParseAssignment(lines[line], &key, &value, &commented) ||
+					commented || key != L"hash")
+				continue;
+			wchar_t hash_text[9];
+			swprintf(hash_text, 9, L"%08x", replacement->second);
+			size_t equals = lines[line].find(L'=');
+			lines[line] = lines[line].substr(0, equals + 1) + L" " + hash_text;
+			break;
+		}
+	}
+	return JoinLines(lines);
+}
+
+std::set<uint32_t> CollectVbHashIniCandidates(
+	const std::wstring& source)
+{
+	std::vector<std::wstring> lines = SplitLines(source);
+	std::set<std::wstring> path_variables;
+	std::set<uint32_t> hashes;
+	for (size_t i = 0; i < lines.size();) {
+		if (Trim(lines[i]) == kBlockBegin) {
+			size_t end = i + 1;
+			while (end < lines.size() && Trim(lines[end]) != kBlockEnd)
+				++end;
+			if (end == lines.size())
+				break;
+			SectionData block = ParseBlock(lines, i, end);
+			if (block.identity_name == L"match_asset_path") {
+				std::set<std::wstring> variables =
+					ExtractVariables(lines, i + 1, end);
+				path_variables.insert(variables.begin(), variables.end());
+			}
+			i = end + 1;
+			continue;
+		}
+		std::wstring section_name;
+		if (!ParseSectionHeader(lines[i], &section_name)) {
+			++i;
+			continue;
+		}
+		size_t end = i + 1;
+		std::wstring next_section;
+		while (end < lines.size() &&
+				!ParseSectionHeader(lines[end], &next_section) &&
+				Trim(lines[end]) != kBlockBegin)
+			++end;
+		if (StartsWithInsensitive(section_name, L"TextureOverride")) {
+			SectionData section = ParseSection(lines, i, end);
+			if (section.identity_name == L"match_asset_path") {
+				std::set<std::wstring> variables =
+					ExtractVariables(lines, i + 1, end);
+				path_variables.insert(variables.begin(), variables.end());
+			}
+		}
+		i = end;
+	}
+
+	for (size_t i = 0; i < lines.size();) {
+		if (Trim(lines[i]) == kBlockBegin) {
+			while (i < lines.size() && Trim(lines[i]) != kBlockEnd)
+				++i;
+			if (i < lines.size())
+				++i;
+			continue;
+		}
+		std::wstring section_name;
+		if (!ParseSectionHeader(lines[i], &section_name) ||
+				!StartsWithInsensitive(section_name, L"TextureOverride")) {
+			++i;
+			continue;
+		}
+		size_t end = i + 1;
+		std::wstring next_section;
+		while (end < lines.size() &&
+				!ParseSectionHeader(lines[end], &next_section) &&
+				Trim(lines[end]) != kBlockBegin)
+			++end;
+		uint32_t hash = 0;
+		bool has_hash = false;
+		bool has_first_index = false;
+		bool has_index_count = false;
+		bool has_path_variable = false;
+		for (size_t line = i + 1; line < end; ++line) {
+			std::wstring key;
+			std::wstring value;
+			bool commented = false;
+			if (!ParseAssignment(lines[line], &key, &value, &commented) || commented)
+				continue;
+			if (key == L"hash")
+				has_hash = ParseHash(value, &hash);
+			else if (key == L"match_first_index")
+				has_first_index = true;
+			else if (key == L"match_index_count")
+				has_index_count = true;
+			else if (!key.empty() && key.front() == L'$' &&
+					Trim(value) == L"1" &&
+					path_variables.find(key) != path_variables.end())
+				has_path_variable = true;
+		}
+		if (has_hash && has_first_index && has_index_count && has_path_variable)
+			hashes.insert(hash);
+		i = end;
+	}
+	return hashes;
+}

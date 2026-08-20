@@ -1,5 +1,27 @@
 # DEV_LOG
 
+## 2026-08-19 - Path-gated VB0 repair with lazy observation
+
+- Purpose: add automatic VB0 hash repair to all four F7 capture modes while
+  keeping old texture/VB0 hashes out of identity decisions.
+- Behavior: trusted `match_asset_path` identities gate observation; VB0
+  candidates are identified from existing Path-linked object variables plus
+  `match_first_index`/`match_index_count`. A replacement is written only when
+  one complete new hash maps to the same draw-signature family; ambiguity is
+  left unchanged. No new INI comments or markers are emitted.
+- Performance boundary: current VB0 hash is cached on vertex-buffer binding.
+  Normal draws whose VB0 remains a stored candidate pay only a set lookup.
+  PS texture-path probing runs once per unseen VB0/draw signature, so repair
+  work is limited to stale-path cases rather than every F7 draw.
+- Key files: `DirectX11/AssetHashCapture.cpp/.h`,
+  `DirectX11/AssetHashIniDocument.cpp/.h`, `DirectX11/HackerContext.cpp`,
+  `DirectX11/ResourceHash.cpp/.h`, and `tests/asset_hash_ini_document_tests.cpp`.
+- Verification: native Asset Hash document tests passed, Draw Debug hunting
+  gate passed, and `Release|x64` rebuilt with zero errors. Build output DLL
+  SHA256: `C0504E2B3E37560A5D51962DD866A69C0579C49F8008031F63097BFA292A3F0E`.
+- Runtime/game acceptance: not run in WuWa; live Daniya multi-VB0 acceptance
+  remains required before installing or packaging a public build.
+
 ## 2026-08-15 - v1.0.3 Draw Debug lifecycle and corrected WWMI package
 
 - Purpose: keep the custom F11/agent Draw Debug feature available without

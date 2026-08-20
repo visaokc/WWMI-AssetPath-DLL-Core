@@ -580,6 +580,9 @@ uint32_t CalcTexture2DDataHashAccurate(const D3D11_TEXTURE2D_DESC *pDesc, const 
 uint32_t CalcTexture3DDataHash(const D3D11_TEXTURE3D_DESC *pDesc, const D3D11_SUBRESOURCE_DATA *pInitialData);
 
 ResourceHandleInfo* GetResourceHandleInfo(ID3D11Resource *resource);
+bool GetResourceAssetPath(
+	ID3D11Resource *resource,
+	std::wstring *asset_path);
 uint32_t GetOrigResourceHash(ID3D11Resource *resource);
 uint32_t GetResourceHash(ID3D11Resource *resource);
 static bool CacheBufferData(ID3D11DeviceContext* context, ID3D11Buffer* buffer, ResourceHandleInfo* info);

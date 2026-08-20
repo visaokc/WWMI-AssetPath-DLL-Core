@@ -5,6 +5,7 @@
 #include <fstream>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "AssetHashIniDocument.h"
@@ -32,6 +33,7 @@ constexpr size_t kMaxHistoricalHashObservations = 32768;
 constexpr size_t kMaxIdentityCharacters = 2048;
 constexpr size_t kMaxRecentIdentities = 32768;
 constexpr size_t kMaxRecentHashObservations = 131072;
+constexpr size_t kMaxVbHashObservations = 65536;
 constexpr ULONGLONG kRecentReleasedTtlMs = 300000;
 SRWLOCK capture_lock = SRWLOCK_INIT;
 HANDLE capture_event = nullptr;
@@ -42,8 +44,13 @@ DWORD status_until = 0;
 std::vector<std::wstring> source_files;
 std::set<std::wstring> watched_identities;
 std::set<uint32_t> watched_legacy_hashes;
+std::set<uint32_t> watched_vb_hashes;
+std::set<std::tuple<uint32_t, uint32_t, uint32_t>> vb_probe_keys;
 AssetHashObservationMap captured_hashes;
 size_t captured_observation_count = 0;
+VbHashObservationList captured_vb_hashes;
+std::set<std::tuple<std::wstring, uint32_t, uint32_t, uint32_t>>
+	captured_vb_hash_keys;
 std::map<std::wstring, std::wstring> observed_name_paths;
 std::set<std::wstring> ambiguous_names;
 
@@ -64,6 +71,9 @@ void ResetCaptureSessionLocked()
 {
 	captured_hashes.clear();
 	captured_observation_count = 0;
+	captured_vb_hashes.clear();
+	captured_vb_hash_keys.clear();
+	vb_probe_keys.clear();
 	observed_name_paths.clear();
 	ambiguous_names.clear();
 	recent_assets.clear();
@@ -585,6 +595,7 @@ bool AtomicWriteUtf8(
 void WriteSnapshot(
 	const std::vector<std::wstring>& sources,
 	const AssetHashObservationMap& observations,
+	const VbHashObservationList& vb_observations,
 	const AssetHashPathIdentityMap& legacy_hash_identities,
 	const std::set<uint32_t>& ambiguous_hashes,
 	CaptureMode mode)
@@ -632,6 +643,9 @@ void WriteSnapshot(
 				legacy_hash_identities,
 				ambiguous_hashes,
 				game_version);
+		transformed = TransformVbHashIniDocument(
+			transformed,
+			vb_observations);
 		if (transformed == previous)
 			continue;
 		if (!AtomicWriteUtf8(output_path, transformed)) {
@@ -651,6 +665,7 @@ DWORD WINAPI CaptureWriterThread(void *)
 
 		std::vector<std::wstring> sources;
 		AssetHashObservationMap observations;
+		VbHashObservationList vb_observations;
 		AssetHashPathIdentityMap legacy_hash_identities;
 		std::set<uint32_t> ambiguous_hashes;
 		CaptureMode mode = CaptureMode::Off;
@@ -663,6 +678,7 @@ DWORD WINAPI CaptureWriterThread(void *)
 		mode = capture_mode;
 		sources = source_files;
 		observations = captured_hashes;
+		vb_observations = captured_vb_hashes;
 		PruneReleasedRecentAssets(GetTickCount64());
 		legacy_hash_identities = BuildLegacyHashIdentitySnapshot();
 		ambiguous_hashes = BuildAmbiguousHashSnapshot();
@@ -673,6 +689,7 @@ DWORD WINAPI CaptureWriterThread(void *)
 		WriteSnapshot(
 			sources,
 			observations,
+			vb_observations,
 			legacy_hash_identities,
 			ambiguous_hashes,
 			mode);
@@ -910,6 +927,7 @@ void RefreshAssetHashCaptureSources()
 
 	std::set<std::wstring> identities;
 	std::set<uint32_t> legacy_hashes;
+	std::set<uint32_t> vb_hashes;
 	bool has_identity_aliases = false;
 	bool needs_canonicalization = false;
 	for (const std::wstring& file : files) {
@@ -932,12 +950,16 @@ void RefreshAssetHashCaptureSources()
 		legacy_hashes.insert(
 			found_legacy_hashes.begin(),
 			found_legacy_hashes.end());
+		std::set<uint32_t> found_vb_hashes =
+			CollectVbHashIniCandidates(document);
+		vb_hashes.insert(found_vb_hashes.begin(), found_vb_hashes.end());
 	}
 
 	AcquireSRWLockExclusive(&capture_lock);
 	source_files = std::move(files);
 	watched_identities = std::move(identities);
 	watched_legacy_hashes = std::move(legacy_hashes);
+	watched_vb_hashes = std::move(vb_hashes);
 	for (auto i = captured_hashes.begin();
 			i != captured_hashes.end();) {
 		if (watched_identities.find(i->first) ==
@@ -1040,6 +1062,42 @@ void ObserveAssetHashForAuthoring(
 		SignalWriter();
 }
 
+void ObserveVbHashForAuthoring(
+	const std::wstring& asset_path,
+	uint32_t hash,
+	uint32_t first_index,
+	uint32_t index_count)
+{
+	if (asset_path.empty() || asset_path.size() > kMaxIdentityCharacters ||
+			!hash || !index_count)
+		return;
+	const std::wstring path_key =
+		IdentityKey(L"match_asset_path", asset_path);
+	bool changed = false;
+	AcquireSRWLockExclusive(&capture_lock);
+	if (capture_mode != CaptureMode::Off &&
+			watched_identities.find(path_key) != watched_identities.end() &&
+			captured_vb_hashes.size() < kMaxVbHashObservations) {
+		auto key = std::make_tuple(
+			Lower(asset_path),
+			hash,
+			first_index,
+			index_count);
+		if (captured_vb_hash_keys.insert(key).second) {
+			captured_vb_hashes.push_back({
+				asset_path,
+				hash,
+				first_index,
+				index_count});
+			capture_dirty = true;
+			changed = true;
+		}
+	}
+	ReleaseSRWLockExclusive(&capture_lock);
+	if (changed)
+		SignalWriter();
+}
+
 void RetireAssetHashForAuthoring(uintptr_t resource_address)
 {
 	if (!resource_address)
@@ -1076,6 +1134,20 @@ bool AssetHashCaptureEnabled()
 	bool enabled = capture_mode != CaptureMode::Off;
 	ReleaseSRWLockShared(&capture_lock);
 	return enabled;
+}
+
+bool AssetHashCaptureNeedsVbObservation(
+	uint32_t hash,
+	uint32_t first_index,
+	uint32_t index_count)
+{
+	AcquireSRWLockExclusive(&capture_lock);
+	bool needed = capture_mode != CaptureMode::Off &&
+		watched_vb_hashes.find(hash) == watched_vb_hashes.end() &&
+		vb_probe_keys.insert(
+			std::make_tuple(hash, first_index, index_count)).second;
+	ReleaseSRWLockExclusive(&capture_lock);
+	return needed;
 }
 
 const wchar_t *AssetHashCaptureStatusText()

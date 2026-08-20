@@ -831,6 +831,23 @@ ResourceHandleInfo* GetResourceHandleInfo(ID3D11Resource *resource)
 	return ret;
 }
 
+bool GetResourceAssetPath(
+	ID3D11Resource *resource,
+	std::wstring *asset_path)
+{
+	if (!resource || !asset_path)
+		return false;
+	bool found = false;
+	EnterCriticalSectionPretty(&G->mResourcesLock);
+	auto info = lookup_resource_handle_info(resource);
+	if (info != G->mResources.end() && !info->second.asset_path.empty()) {
+		*asset_path = info->second.asset_path;
+		found = true;
+	}
+	LeaveCriticalSection(&G->mResourcesLock);
+	return found;
+}
+
 // Must be called with the critical section held to protect mResources against
 // simultaneous reads & modifications
 uint32_t GetOrigResourceHash(ID3D11Resource *resource)

@@ -667,6 +667,104 @@ void TestGeneratedSectionsUseCanonicalNames()
 			!AssetHashIniNeedsCanonicalization(repaired),
 		"legacy path blocks must repair without trusting the commented path");
 }
+
+std::wstring VbSourceDocument()
+{
+	return
+		L"[TextureOverrideComponent0_ib0]\r\n"
+		L"hash = aaaaaaaa\r\n"
+		L"match_first_index = 0\r\n"
+		L"match_index_count = 100\r\n"
+		L"$object_detected_ib0 = 1\r\n"
+		L"\r\n"
+		L"[TextureOverrideComponent1_ib0]\r\n"
+		L"hash = aaaaaaaa\r\n"
+		L"match_first_index = 100\r\n"
+		L"match_index_count = 50\r\n"
+		L"$object_detected_ib0 = 1\r\n"
+		L"\r\n"
+		L"[TextureOverrideFoldHost_ib0]\r\n"
+		L"hash = cccccccc\r\n"
+		L"match_first_index = 0\r\n"
+		L"match_index_count = 100\r\n"
+		L"$object_detected_ib0 = 1\r\n"
+		L"\r\n"
+		L"[TextureOverrideComponent_ib1]\r\n"
+		L"hash = bbbbbbbb\r\n"
+		L"match_first_index = 0\r\n"
+		L"match_index_count = 80\r\n"
+		L"$object_detected_ib1 = 1\r\n"
+		L"\r\n"
+		L"; <asset-hash-stream>\r\n"
+		L"; match_asset_path = /Game/Test/Body.Body\r\n"
+		L"[TextureOverride_Texture_01010101]\r\n"
+		L"hash = 01010101\r\n"
+		L"if $object_detected_ib0\r\n"
+		L"    this = ResourceBody\r\n"
+		L"endif\r\n"
+		L"; </asset-hash-stream>\r\n"
+		L"\r\n"
+		L"; <asset-hash-stream>\r\n"
+		L"; match_asset_path = /Game/Test/Shared.Shared\r\n"
+		L"[TextureOverride_Texture_02020202]\r\n"
+		L"hash = 02020202\r\n"
+		L"if $object_detected_ib0 || $object_detected_ib1\r\n"
+		L"    this = ResourceShared\r\n"
+		L"endif\r\n"
+		L"; </asset-hash-stream>\r\n";
+}
+
+void TestVbHashReplacementUsesPathGroupAndCompleteDrawSignature()
+{
+	const std::wstring source = VbSourceDocument();
+	const std::set<uint32_t> candidates = CollectVbHashIniCandidates(source);
+	Require(
+		candidates.size() == 3 &&
+			candidates.find(0xaaaaaaaa) != candidates.end() &&
+			candidates.find(0xbbbbbbbb) != candidates.end() &&
+			candidates.find(0xcccccccc) != candidates.end(),
+		"only host families linked to Path object variables must gate VB0 capture");
+	const VbHashObservationList observations = {
+		{L"/Game/Test/Body.Body", 0x11111111, 0, 100},
+		{L"/Game/Test/Shared.Shared", 0x11111111, 100, 50},
+		{L"/Game/Test/Shared.Shared", 0x22222222, 0, 80}};
+	const std::wstring updated =
+		TransformVbHashIniDocument(source, observations);
+	Require(
+		Count(updated, L"hash = 11111111") == 2,
+		"one complete ib0 draw-signature family must replace every old host hash");
+	Require(
+		updated.find(L"hash = aaaaaaaa") == std::wstring::npos,
+		"the replaced ib0 host hash must not remain");
+	Require(
+		updated.find(L"hash = 22222222") != std::wstring::npos &&
+			updated.find(L"hash = bbbbbbbb") == std::wstring::npos,
+		"a shared Path must still resolve ib1 through its distinct draw signature");
+	Require(
+		updated.find(L"hash = cccccccc") != std::wstring::npos,
+		"a partial alternative host family must not be replaced by a superset");
+	Require(
+		Count(updated, L"; <asset-hash-stream>") == 2 &&
+			Count(updated, L"; </asset-hash-stream>") == 2,
+		"VB0 replacement must not add or remove Path comments or markers");
+}
+
+void TestVbHashReplacementRejectsAmbiguity()
+{
+	const std::wstring source = VbSourceDocument();
+	const VbHashObservationList observations = {
+		{L"/Game/Test/Body.Body", 0x11111111, 0, 100},
+		{L"/Game/Test/Shared.Shared", 0x11111111, 100, 50},
+		{L"/Game/Test/Body.Body", 0x33333333, 0, 100},
+		{L"/Game/Test/Shared.Shared", 0x33333333, 100, 50}};
+	const std::wstring updated =
+		TransformVbHashIniDocument(source, observations);
+	Require(
+		Count(updated, L"hash = aaaaaaaa") == 2 &&
+			updated.find(L"hash = 11111111") == std::wstring::npos &&
+			updated.find(L"hash = 33333333") == std::wstring::npos,
+		"two complete new VB0 candidates must leave the old family unchanged");
+}
 }
 
 int main()
@@ -685,6 +783,8 @@ int main()
 	TestMarkedPathCanReturnToGeneratedHashes();
 	TestShortIdentityAliasesCanonicalize();
 	TestGeneratedSectionsUseCanonicalNames();
+	TestVbHashReplacementUsesPathGroupAndCompleteDrawSignature();
+	TestVbHashReplacementRejectsAmbiguity();
 	std::cout << "asset_hash_ini_document_tests: PASS\n";
 	return 0;
 }
