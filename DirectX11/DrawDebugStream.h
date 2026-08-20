@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <string>
 
 void ConfigureDrawDebugStream(bool enabled, unsigned max_records);
 void SetDrawDebugControlAllowed(bool allowed);
@@ -15,3 +16,7 @@ void DrawDebugStreamMark(const char *label);
 bool ConsumeDrawDebugStartRequest();
 bool ConsumeDrawDebugStopRequest();
 bool ConsumeDrawDebugSnapshotRequest();
+bool ConsumeAgentDumpRequest(std::string *request);
+bool DrawDebugStreamIsLearnedShader(uint64_t hash);
+void SetAgentDumpResult(bool success, const std::wstring& path,
+	const std::string& error);

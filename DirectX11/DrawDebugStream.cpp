@@ -24,7 +24,10 @@ HANDLE writer_thread = NULL;
 HANDLE pipe_thread = NULL;
 HANDLE output_file = INVALID_HANDLE_VALUE;
 std::deque<std::string> queue;
+std::deque<std::string> agent_dump_requests;
 std::wstring output_path;
+std::wstring last_dump_path;
+std::string last_dump_error;
 std::atomic<bool> configured(false);
 std::atomic<bool> control_allowed(false);
 std::atomic<bool> active(false);
@@ -37,6 +40,9 @@ std::atomic<unsigned long long> sequence(0);
 std::atomic<unsigned long long> frame(0);
 std::atomic<unsigned long long> written(0);
 std::atomic<unsigned long long> dropped(0);
+std::atomic<unsigned> pending_dumps(0);
+std::atomic<unsigned long long> completed_dumps(0);
+std::atomic<bool> last_dump_ok(false);
 unsigned queue_limit = 65536;
 std::atomic<unsigned> draw_filter_count(0);
 std::atomic<unsigned long long> draw_filters[128];
@@ -128,25 +134,44 @@ DWORD WINAPI WriterThreadProc(void *)
 
 std::string StatusJson()
 {
-	char buf[1024];
+	char buf[2048];
 	char path_utf8[MAX_PATH * 3] = {};
+	char dump_path_utf8[MAX_PATH * 3] = {};
+	char dump_error[512] = {};
 	EnterCriticalSection(&queue_lock);
 	std::wstring path = output_path;
+	std::wstring dump_path = last_dump_path;
+	strncpy_s(dump_error, last_dump_error.c_str(), _TRUNCATE);
 	LeaveCriticalSection(&queue_lock);
 	WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1,
 		path_utf8, sizeof(path_utf8), NULL, NULL);
+	WideCharToMultiByte(CP_UTF8, 0, dump_path.c_str(), -1,
+		dump_path_utf8, sizeof(dump_path_utf8), NULL, NULL);
 	for (char *p = path_utf8; *p; ++p) {
 		if (*p == '\\')
 			*p = '/';
 	}
+	for (char *p = dump_path_utf8; *p; ++p) {
+		if (*p == '\\')
+			*p = '/';
+	}
+	for (char *p = dump_error; *p; ++p) {
+		if (*p == '"' || *p == '\\' || (unsigned char)*p < 0x20)
+			*p = '_';
+	}
 	sprintf_s(buf,
 		"{\"active\":%s,\"agent_hunting_required\":false,\"control_allowed\":%s,"
 		"\"frame\":%llu,\"sequence\":%llu,"
-		"\"written\":%llu,\"dropped\":%llu,\"path\":\"%s\"}\n",
+		"\"written\":%llu,\"dropped\":%llu,\"path\":\"%s\","
+		"\"pending_dumps\":%u,\"completed_dumps\":%llu,\"last_dump_ok\":%s,"
+		"\"last_dump_path\":\"%s\",\"last_dump_error\":\"%s\"}\n",
 		active.load() ? "true" : "false",
 		control_allowed.load() ? "true" : "false",
 		frame.load(), sequence.load(),
-		written.load(), dropped.load(), path_utf8);
+		written.load(), dropped.load(), path_utf8,
+		pending_dumps.load(), completed_dumps.load(),
+		last_dump_ok.load() ? "true" : "false",
+		dump_path_utf8, dump_error);
 	return std::string(buf);
 }
 
@@ -224,6 +249,16 @@ DWORD WINAPI PipeThreadProc(void *)
 			} else if (!_stricmp(command, "SNAPSHOT")) {
 				snapshot_requested.store(true);
 				response = "QUEUED SNAPSHOT\n";
+			} else if (!_strnicmp(command, "DUMP ", 5)) {
+				EnterCriticalSection(&queue_lock);
+				if (agent_dump_requests.size() < 128) {
+					agent_dump_requests.emplace_back(command + 5);
+					pending_dumps.store((unsigned)agent_dump_requests.size());
+					response = "QUEUED DUMP\n";
+				} else {
+					response = "ERROR dump queue limit\n";
+				}
+				LeaveCriticalSection(&queue_lock);
 			} else if (!_strnicmp(command, "MARK ", 5)) {
 				DrawDebugStreamMark(command + 5);
 				response = "OK MARK\n";
@@ -448,3 +483,44 @@ void DrawDebugStreamMark(const char *label)
 bool ConsumeDrawDebugStartRequest() { return start_requested.exchange(false); }
 bool ConsumeDrawDebugStopRequest() { return stop_requested.exchange(false); }
 bool ConsumeDrawDebugSnapshotRequest() { return snapshot_requested.exchange(false); }
+
+bool ConsumeAgentDumpRequest(std::string *request)
+{
+	if (!request || !EnsureInitialized())
+		return false;
+	EnterCriticalSection(&queue_lock);
+	if (agent_dump_requests.empty()) {
+		LeaveCriticalSection(&queue_lock);
+		return false;
+	}
+	*request = std::move(agent_dump_requests.front());
+	agent_dump_requests.pop_front();
+	pending_dumps.store((unsigned)agent_dump_requests.size());
+	LeaveCriticalSection(&queue_lock);
+	return true;
+}
+
+bool DrawDebugStreamIsLearnedShader(uint64_t hash)
+{
+	unsigned count = learned_shader_count.load(std::memory_order_acquire);
+	if (count > _countof(learned_shaders))
+		count = (unsigned)_countof(learned_shaders);
+	for (unsigned i = 0; i < count; ++i) {
+		if (learned_shaders[i].load(std::memory_order_relaxed) == hash)
+			return true;
+	}
+	return false;
+}
+
+void SetAgentDumpResult(bool success, const std::wstring& path,
+	const std::string& error)
+{
+	if (!EnsureInitialized())
+		return;
+	EnterCriticalSection(&queue_lock);
+	last_dump_path = path;
+	last_dump_error = error;
+	last_dump_ok.store(success);
+	completed_dumps.fetch_add(1);
+	LeaveCriticalSection(&queue_lock);
+}

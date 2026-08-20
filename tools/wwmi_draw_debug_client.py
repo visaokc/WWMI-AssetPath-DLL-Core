@@ -82,6 +82,27 @@ def tail(follow: bool) -> None:
         time.sleep(0.25)
 
 
+def dump(command: str) -> None:
+    before = json.loads(request("STATUS"))["completed_dumps"]
+    response = request(f"DUMP {command}")
+    if not response.startswith("QUEUED"):
+        raise SystemExit(response)
+    deadline = time.monotonic() + 30.0
+    while True:
+        status = json.loads(request("STATUS"))
+        if status["completed_dumps"] > before:
+            if not status["last_dump_ok"]:
+                raise SystemExit(status["last_dump_error"])
+            if status["last_dump_path"]:
+                print(status["last_dump_path"])
+            else:
+                print("OK")
+            return
+        if time.monotonic() >= deadline:
+            raise SystemExit("Timed out waiting for agent dump")
+        time.sleep(0.05)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="WWMI Draw Debug control client")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -93,6 +114,20 @@ def main() -> None:
     arm.add_argument("ini", type=Path)
     tail_parser = sub.add_parser("tail")
     tail_parser.add_argument("--follow", action="store_true")
+    frame_parser = sub.add_parser("dump-frame")
+    frame_parser.add_argument(
+        "options",
+        nargs="*",
+        help="FrameAnalysis options such as dump_cb dump_vb dump_ib buf txt",
+    )
+    shader_parser = sub.add_parser("dump-shader")
+    shader_parser.add_argument("hash")
+    shader_parser.add_argument("--stage", choices=("vs", "ps", "cs", "gs", "hs", "ds"))
+    shader_parser.add_argument("--format", choices=("asm", "bin", "both"), default="both")
+    target_parser = sub.add_parser("dump-target-shaders")
+    target_parser.add_argument("--format", choices=("asm", "bin", "both"), default="both")
+    raw_parser = sub.add_parser("dump-raw")
+    raw_parser.add_argument("request", nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
     if args.command == "arm":
@@ -101,6 +136,17 @@ def main() -> None:
         print(request(f"MARK {args.label}"))
     elif args.command == "tail":
         tail(args.follow)
+    elif args.command == "dump-frame":
+        dump("FRAME " + (" ".join(args.options) if args.options else "default"))
+    elif args.command == "dump-shader":
+        stage = f"{args.stage} " if args.stage else ""
+        dump(f"SHADER {stage}{args.hash} {args.format}")
+    elif args.command == "dump-target-shaders":
+        dump(f"SHADERS TARGET {args.format}")
+    elif args.command == "dump-raw":
+        if not args.request:
+            raise SystemExit("dump-raw requires a request")
+        dump(" ".join(args.request))
     else:
         print(request(args.command.upper()))
 

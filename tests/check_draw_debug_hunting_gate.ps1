@@ -5,8 +5,8 @@ $hunting = Get-Content (Join-Path $root 'DirectX11\Hunting.cpp') -Raw
 $stream = Get-Content (Join-Path $root 'DirectX11\DrawDebugStream.cpp') -Raw
 
 $requiredHuntingContracts = @(
-    'if (!agent_control && G->hunting != HUNTING_MODE_ENABLED)',
-    '(!agent_control && G->hunting != HUNTING_MODE_ENABLED)',
+    'if (!agent_control && (!draw_debug_enabled ||',
+    'G->hunting != HUNTING_MODE_ENABLED))',
     'AnalyseFrameInternal(device, false);',
     'StartLightDrawDebug(false);',
     'StartHeavyDrawDebug(device, false);'
@@ -21,7 +21,7 @@ if ($stream.Contains('ERROR hunting mode required')) {
     throw 'Agent START, ARM, and SNAPSHOT must bypass the human Hunting gate.'
 }
 $requiredAgentContracts = @(
-    'SetDrawDebugControlAllowed(draw_debug_enabled);',
+    'SetDrawDebugControlAllowed(true);',
     'StartLightDrawDebug(true);',
     'StartHeavyDrawDebug(device, true);',
     '\"agent_hunting_required\":false',

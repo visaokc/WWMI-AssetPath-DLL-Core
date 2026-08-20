@@ -1,5 +1,34 @@
 # DEV_LOG
 
+## 2026-08-20 - Unrestricted agent frame-resource and shader dump control
+
+- Purpose: make the local agent channel sufficient for future diagnostics
+  without repeatedly extending the DLL or enabling the human Hunting UI.
+- Behavior: the named pipe now queues generic `DUMP` work for the render
+  thread. `DUMP FRAME` accepts arbitrary standard FrameAnalysis options,
+  including CB/VB/IB/texture/RT/depth payload and output-format flags.
+  `DUMP SHADER` exports any loaded shader by hash and optional stage as original
+  assembly, DXBC, or both; `DUMP SHADERS TARGET` exports shaders learned by an
+  armed target capture. Shader files are isolated under `AgentDumps\Shaders`
+  and cannot be picked up as `ShaderFixes` overrides.
+- Human boundary: keyboard F8/F11 behavior is unchanged and still requires
+  both the configured feature and Hunting. Only the local named-pipe agent path
+  bypasses both gates, so it remains available even if `[DrawDebug] enabled`
+  is false.
+- Client/protocol: `tools/wwmi_draw_debug_client.py` adds `dump-frame`,
+  `dump-shader`, `dump-target-shaders`, and `dump-raw`; `STATUS` reports queue,
+  completion, output path, and error state.
+- Isolation: implemented in worktree
+  `D:\MOD\BlenderAddonProjects\.worktrees\wwmi-agent-unrestricted-dump` on
+  branch `agent/unrestricted-dump`, leaving the concurrent main-worktree DLL
+  changes untouched until their commit is ready to merge.
+- Verification: static agent/Hunting contracts, Python syntax/client CLI,
+  native Asset Hash document tests, release INI checks, and `git diff --check`
+  passed. Final `Release|x64` rebuild completed with 212 pre-existing warnings
+  and zero errors. DLL SHA256:
+  `69B2871929EE91C355B78574528CEB39DC87BBABDA37148563A0A36D00E169D6`.
+  Live installation is deferred while WuWa is running.
+
 ## 2026-08-20 - Hunting-independent agent Draw Debug control
 
 - Purpose: let the local named-pipe agent start continuous, targeted, and

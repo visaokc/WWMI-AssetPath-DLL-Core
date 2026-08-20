@@ -167,16 +167,27 @@ disk-write cost remain limited to actual captures.
 
 ### Agent control and targeted capture
 
-While Draw Debug is enabled, the local-only named pipe
+The local-only agent named pipe
 `\\.\pipe\wwmi-draw-debug` accepts `PING`, `STATUS`, `START`, `STOP`,
-`SNAPSHOT`, `MARK <label>`, `FILTER CLEAR`, `FILTER DRAW <count> <first>`, and
-`ARM`. Pipe commands only queue state changes; D3D11 work remains on the render
+`SNAPSHOT`, `MARK <label>`, `FILTER CLEAR`, `FILTER DRAW <count> <first>`,
+`ARM`, and agent-only `DUMP` requests. Pipe commands only queue state changes;
+D3D11 work remains on the render
 thread. Continuous records use a bounded non-blocking queue and an asynchronous
 JSONL writer. Queue contention or overflow increments `dropped` instead of
 stalling the game. Agent `START`, `ARM`, and `SNAPSHOT` bypass the human Hunting
 gate; `STATUS` reports `agent_hunting_required=false` and `control_allowed`.
-Human F11/F8 handling remains Hunting-gated, and `STOP` remains available so an
-existing stream can always be terminated.
+Human F11/F8 handling remains both `[DrawDebug] enabled` and Hunting-gated.
+The agent pipe and its `START`, `SNAPSHOT`, and `DUMP` operations remain
+available even when `[DrawDebug] enabled = false`; `STOP` remains available so
+an existing stream can always be terminated.
+
+Agent `DUMP FRAME` accepts the standard FrameAnalysis option vocabulary, so
+the caller can request logs, constant buffers, vertex/index buffers, textures,
+render targets, depth targets, and their supported text/binary/image formats
+without changing the DLL again. Agent `DUMP SHADER` exports the original loaded
+shader as assembly, DXBC bytecode, or both. Shader output is isolated under
+`AgentDumps\Shaders` beside the loaded DLL and is never written into
+`ShaderFixes`.
 
 Use the included zero-dependency client:
 
@@ -185,9 +196,17 @@ python .\tools\wwmi_draw_debug_client.py status
 python .\tools\wwmi_draw_debug_client.py start
 python .\tools\wwmi_draw_debug_client.py mark problem_visible
 python .\tools\wwmi_draw_debug_client.py snapshot
+python .\tools\wwmi_draw_debug_client.py dump-frame dump_cb dump_vb dump_ib buf txt desc
+python .\tools\wwmi_draw_debug_client.py dump-frame dump_tex dump_rt dump_depth dds
+python .\tools\wwmi_draw_debug_client.py dump-shader 0123456789abcdef --stage vs --format both
+python .\tools\wwmi_draw_debug_client.py dump-target-shaders --format asm
 python .\tools\wwmi_draw_debug_client.py stop
 python .\tools\wwmi_draw_debug_client.py tail --follow
 ```
+
+`dump-raw` exposes future or low-level `DUMP` request forms without another
+client update. `STATUS` includes dump queue/completion counters and the last
+result path/error, allowing the client to wait for render-thread completion.
 
 Targeted mode derives component draw signatures from a mod INI, records only
 matching draws and later draws sharing learned VS/PS identities, and queues one

@@ -2,6 +2,8 @@
 
 #include <string>
 #include <sstream>
+#include <set>
+#include <vector>
 #include <D3Dcompiler.h>
 #include <codecvt>
 
@@ -32,6 +34,13 @@ static bool draw_debug_light_active = false;
 static bool draw_debug_light_agent_control = false;
 static ULONGLONG draw_debug_key_down_tick = 0;
 static unsigned draw_debug_long_press_ms = 1000;
+
+enum class AgentShaderDumpFormat
+{
+	Asm,
+	Bytecode,
+	Both,
+};
 
 // bo3b: For this routine, we have a lot of warnings in x64, from converting a size_t result into the needed
 //  DWORD type for the Write calls.  These are writing 256 byte strings, so there is never a chance that it 
@@ -1318,47 +1327,148 @@ static void AnalyseFrameStop(HackerDevice *device, void *private_data)
 	}
 }
 
-static void StartHeavyDrawDebug(HackerDevice *device, bool agent_control)
+static bool EnsureAgentShaderDumpDirectory(std::wstring *directory)
+{
+	if (!directory)
+		return false;
+	wchar_t module_path[MAX_PATH] = {};
+	if (!GetModuleFileNameW(migoto_handle, module_path, _countof(module_path)))
+		return false;
+	wchar_t *slash = wcsrchr(module_path, L'\\');
+	if (!slash)
+		return false;
+	*slash = 0;
+	wchar_t root[MAX_PATH] = {};
+	wchar_t shaders[MAX_PATH] = {};
+	swprintf_s(root, L"%ls\\AgentDumps", module_path);
+	swprintf_s(shaders, L"%ls\\Shaders", root);
+	if (!CreateDirectoryW(root, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
+		return false;
+	if (!CreateDirectoryW(shaders, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
+		return false;
+	*directory = shaders;
+	return true;
+}
+
+static bool WriteAgentDumpFile(const std::wstring& path, const void *data,
+	size_t size)
+{
+	FILE *file = NULL;
+	if (_wfopen_s(&file, path.c_str(), L"wb") || !file)
+		return false;
+	bool success = fwrite(data, 1, size, file) == size;
+	success = fclose(file) == 0 && success;
+	return success;
+}
+
+static bool DumpAgentShader(UINT64 hash, const std::wstring& requested_type,
+	AgentShaderDumpFormat format, std::wstring *output_directory,
+	std::string *error)
+{
+	std::wstring directory;
+	if (!EnsureAgentShaderDumpDirectory(&directory)) {
+		if (error)
+			*error = "unable to create AgentDumps/Shaders";
+		return false;
+	}
+
+	bool found = false;
+	bool success = true;
+	EnterCriticalSectionPretty(&G->mCriticalSection);
+	for (const auto& shader : G->mReloadedShaders) {
+		const OriginalShaderInfo& info = shader.second;
+		if (info.hash != hash ||
+				(!requested_type.empty() && info.shaderType != requested_type))
+			continue;
+		found = true;
+		wchar_t base[MAX_PATH] = {};
+		swprintf_s(base, L"%ls\\%016llx-%ls", directory.c_str(), hash,
+			info.shaderType.c_str());
+		if (format == AgentShaderDumpFormat::Asm ||
+				format == AgentShaderDumpFormat::Both) {
+			std::string assembly = BinaryToAsmText(
+				info.byteCode->GetBufferPointer(),
+				info.byteCode->GetBufferSize(),
+				G->patch_cb_offsets,
+				G->disassemble_undecipherable_custom_data);
+			std::wstring path = std::wstring(base) + L".txt";
+			if (assembly.empty() ||
+					!WriteAgentDumpFile(path, assembly.data(), assembly.size()))
+				success = false;
+		}
+		if (format == AgentShaderDumpFormat::Bytecode ||
+				format == AgentShaderDumpFormat::Both) {
+			std::wstring path = std::wstring(base) + L".bin";
+			if (!WriteAgentDumpFile(path,
+					info.byteCode->GetBufferPointer(),
+					info.byteCode->GetBufferSize()))
+				success = false;
+		}
+		break;
+	}
+	LeaveCriticalSection(&G->mCriticalSection);
+
+	if (!found) {
+		if (error)
+			*error = "shader hash/stage is not loaded";
+		return false;
+	}
+	if (!success) {
+		if (error)
+			*error = "failed to disassemble or write shader";
+		return false;
+	}
+	if (output_directory)
+		*output_directory = directory;
+	return true;
+}
+
+static bool StartHeavyDrawDebug(HackerDevice *device, bool agent_control,
+	FrameAnalysisOptions requested_options = FrameAnalysisOptions::INVALID)
 {
 	FrameAnalysisContext *factx = NULL;
 
-	if (!draw_debug_enabled ||
-			(!agent_control && G->hunting != HUNTING_MODE_ENABLED))
-		return;
+	if (!agent_control && (!draw_debug_enabled ||
+			G->hunting != HUNTING_MODE_ENABLED))
+		return false;
 
 	if (G->analyse_frame) {
 		device->GetHackerContext()->FrameAnalysisLog("----- Draw Debug aborted -----\n");
 		_AnalyseFrameStop();
-		return;
+		return false;
 	}
 
 	if (FAILED(device->GetHackerContext()->QueryInterface(
 			IID_FrameAnalysisContext, (void**)&factx))) {
 		LogOverlay(LOG_DIRE,
 			"Draw Debug context is missing: restart the game after enabling [DrawDebug]\n");
-		return;
+		return false;
 	}
 	factx->Release();
 
 	draw_debug_previous_options = G->def_analyse_options;
 	draw_debug_active = true;
-	G->def_analyse_options = draw_debug_options;
+	G->def_analyse_options = requested_options == FrameAnalysisOptions::INVALID
+		? draw_debug_options
+		: requested_options;
 	SetAssetPathFrameAnalysisEnabled(
 		!!(G->def_analyse_options & FrameAnalysisOptions::ASSET_PATH));
 
 	AnalyseFrameInternal(device, agent_control);
 	if (!G->analyse_frame) {
 		FinishDrawDebugCapture();
-		return;
+		return false;
 	}
 
 	LogOverlay(LOG_NOTICE, "Draw Debug: capturing one complete frame\n");
+	return true;
 }
 
 static void StartLightDrawDebug(bool agent_control)
 {
 	if (draw_debug_light_active ||
-			(!agent_control && G->hunting != HUNTING_MODE_ENABLED))
+			(!agent_control && (!draw_debug_enabled ||
+				G->hunting != HUNTING_MODE_ENABLED)))
 		return;
 	draw_debug_light_active = true;
 	draw_debug_light_agent_control = agent_control;
@@ -1374,6 +1484,148 @@ static void StopLightDrawDebug()
 	draw_debug_light_active = false;
 	draw_debug_light_agent_control = false;
 	LogOverlay(LOG_INFO, "Draw Debug Stream: OFF\n");
+}
+
+static AgentShaderDumpFormat ParseAgentShaderDumpFormat(
+	const std::string& value, bool *valid)
+{
+	if (valid)
+		*valid = true;
+	if (!_stricmp(value.c_str(), "asm"))
+		return AgentShaderDumpFormat::Asm;
+	if (!_stricmp(value.c_str(), "bin") ||
+			!_stricmp(value.c_str(), "bytecode"))
+		return AgentShaderDumpFormat::Bytecode;
+	if (value.empty() || !_stricmp(value.c_str(), "both"))
+		return AgentShaderDumpFormat::Both;
+	if (valid)
+		*valid = false;
+	return AgentShaderDumpFormat::Both;
+}
+
+static bool ParseAgentShaderStage(const std::string& value,
+	std::wstring *stage)
+{
+	static const char *stages[] = { "vs", "ps", "cs", "gs", "hs", "ds" };
+	for (const char *candidate : stages) {
+		if (!_stricmp(value.c_str(), candidate)) {
+			if (stage)
+				stage->assign(value.begin(), value.end());
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool ParseAgentShaderHash(const std::string& value, UINT64 *hash)
+{
+	if (!hash || value.empty())
+		return false;
+	char *end = NULL;
+	UINT64 parsed = _strtoui64(value.c_str(), &end, 16);
+	if (!end || *end || !parsed)
+		return false;
+	*hash = parsed;
+	return true;
+}
+
+static void HandleAgentDumpRequest(HackerDevice *device,
+	const std::string& request)
+{
+	std::istringstream input(request);
+	std::string kind;
+	input >> kind;
+	if (!_stricmp(kind.c_str(), "FRAME")) {
+		std::string options;
+		std::getline(input, options);
+		size_t first = options.find_first_not_of(" \t");
+		if (first != std::string::npos)
+			options.erase(0, first);
+		if (options.empty() || !_stricmp(options.c_str(), "default")) {
+			bool success = StartHeavyDrawDebug(device, true);
+			SetAgentDumpResult(success, success ? G->ANALYSIS_PATH : L"",
+				success ? "" : "unable to start frame analysis");
+			return;
+		}
+		std::wstring wide_options(options.begin(), options.end());
+		std::vector<wchar_t> mutable_options(
+			wide_options.begin(), wide_options.end());
+		mutable_options.push_back(0);
+		FrameAnalysisOptions parsed =
+			parse_enum_option_string<wchar_t *, FrameAnalysisOptions>(
+				FrameAnalysisOptionNames, mutable_options.data(), NULL);
+		if (parsed == FrameAnalysisOptions::INVALID) {
+			SetAgentDumpResult(false, L"", "invalid frame analysis options");
+			return;
+		}
+		bool success = StartHeavyDrawDebug(device, true, parsed);
+		SetAgentDumpResult(success, success ? G->ANALYSIS_PATH : L"",
+			success ? "" : "unable to start frame analysis");
+		return;
+	}
+
+	if (!_stricmp(kind.c_str(), "SHADER")) {
+		std::string first_token;
+		std::string second_token;
+		std::string format_token;
+		input >> first_token >> second_token >> format_token;
+		std::wstring stage;
+		std::string hash_token = first_token;
+		if (ParseAgentShaderStage(first_token, &stage)) {
+			hash_token = second_token;
+		} else {
+			format_token = second_token;
+		}
+		UINT64 hash = 0;
+		bool format_valid = false;
+		AgentShaderDumpFormat format = ParseAgentShaderDumpFormat(
+			format_token, &format_valid);
+		if (!ParseAgentShaderHash(hash_token, &hash) || !format_valid) {
+			SetAgentDumpResult(false, L"",
+				"syntax: DUMP SHADER [stage] hash [asm|bin|both]");
+			return;
+		}
+		std::wstring directory;
+		std::string error;
+		bool success = DumpAgentShader(hash, stage, format, &directory, &error);
+		SetAgentDumpResult(success, directory, error);
+		return;
+	}
+
+	if (!_stricmp(kind.c_str(), "SHADERS")) {
+		std::string selection;
+		std::string format_token;
+		input >> selection >> format_token;
+		bool format_valid = false;
+		AgentShaderDumpFormat format = ParseAgentShaderDumpFormat(
+			format_token, &format_valid);
+		if (_stricmp(selection.c_str(), "target") || !format_valid) {
+			SetAgentDumpResult(false, L"",
+				"syntax: DUMP SHADERS TARGET [asm|bin|both]");
+			return;
+		}
+		std::set<UINT64> hashes;
+		EnterCriticalSectionPretty(&G->mCriticalSection);
+		for (const auto& shader : G->mReloadedShaders) {
+			if (DrawDebugStreamIsLearnedShader(shader.second.hash))
+				hashes.insert(shader.second.hash);
+		}
+		LeaveCriticalSection(&G->mCriticalSection);
+		std::wstring directory;
+		std::string error;
+		bool success = !hashes.empty();
+		for (UINT64 hash : hashes) {
+			if (!DumpAgentShader(hash, L"", format, &directory, &error))
+				success = false;
+		}
+		if (hashes.empty())
+			error = "no targeted shader hashes have been learned";
+		SetAgentDumpResult(success, directory, error);
+		return;
+	}
+
+	SetAgentDumpResult(false, L"",
+		"supported dumps: FRAME, SHADER, SHADERS TARGET");
 }
 
 static void DrawDebugKeyDown(HackerDevice *device, void *private_data)
@@ -1406,15 +1658,19 @@ void UpdateDrawDebugControl(HackerDevice *device)
 {
 	const bool hunting_enabled =
 		G->hunting == HUNTING_MODE_ENABLED;
-	SetDrawDebugControlAllowed(draw_debug_enabled);
-	if (!draw_debug_enabled)
-		return;
+	SetDrawDebugControlAllowed(true);
 	if (ConsumeDrawDebugStopRequest())
 		StopLightDrawDebug();
 	if (ConsumeDrawDebugStartRequest())
 		StartLightDrawDebug(true);
 	if (ConsumeDrawDebugSnapshotRequest() && !G->analyse_frame)
 		StartHeavyDrawDebug(device, true);
+	std::string agent_dump_request;
+	for (unsigned i = 0; i < 32 &&
+			ConsumeAgentDumpRequest(&agent_dump_request); ++i)
+		HandleAgentDumpRequest(device, agent_dump_request);
+	if (!draw_debug_enabled)
+		return;
 	if (!hunting_enabled) {
 		draw_debug_key_held = false;
 		if (draw_debug_light_active && !draw_debug_light_agent_control)
@@ -2097,7 +2353,7 @@ void ParseHuntingSection()
 	LogInfo("[DrawDebug]\n");
 	draw_debug_enabled = GetIniBool(L"DrawDebug", L"enabled", false, NULL);
 	draw_debug_long_press_ms = GetIniInt(L"DrawDebug", L"long_press_ms", 1000, NULL);
-	ConfigureDrawDebugStream(draw_debug_enabled,
+	ConfigureDrawDebugStream(true,
 		GetIniInt(L"DrawDebug", L"max_queue_records", 65536, NULL));
 	if (GetIniStringAndLog(L"DrawDebug", L"options", 0, buf, MAX_PATH)) {
 		draw_debug_options = parse_enum_option_string<wchar_t *, FrameAnalysisOptions>
