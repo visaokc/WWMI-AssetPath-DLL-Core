@@ -1226,11 +1226,11 @@ void TestMergedShapeKeyRootsUseVariableCountAndPreserveObservedHostPair()
 		"an observed active host pair must remain valid beside same-sized merged host pairs");
 }
 
-void TestMergedShapeKeyRootExcludesPairsClaimedByOtherHosts()
+void TestUnifiedShapeAssignmentUsesUniqueUnclaimedPairAcrossHosts()
 {
 	const std::wstring source =
 		L"[Constants]\r\n"
-		L"global $mesh_vertex_count_ib0 = 1000\r\n\r\n"
+		L"global $mesh_vertex_count_ib0 = 9000\r\n\r\n"
 		L"[TextureOverridePath]\r\n"
 		L"match_asset_path = /Game/Test/Merged.Merged\r\n"
 		L"$object_detected_ib0 = 1\r\n\r\n"
@@ -1254,10 +1254,10 @@ void TestMergedShapeKeyRootExcludesPairsClaimedByOtherHosts()
 		{0xaaaaaaaa, 24000, 0, 4444, 0, true},
 		{0xbbbbbbbb, 4000, 0, 3333, 1, true},
 		{0xbbbbbbbb, 4000, 0, 4444, 1, true},
-		{0xcccccccc, 24000, 0, 3333, 0, true},
-		{0xcccccccc, 24000, 0, 4444, 0, true},
-		{0xdddddddd, 4000, 0, 3333, 1, true},
-		{0xdddddddd, 4000, 0, 4444, 1, true}};
+		{0xcccccccc, 48000, 0, 3333, 0, true},
+		{0xcccccccc, 48000, 0, 4444, 0, true},
+		{0xdddddddd, 8000, 0, 3333, 1, true},
+		{0xdddddddd, 8000, 0, 4444, 1, true}};
 	const std::wstring updated = TransformVbHashIniDocument(
 		source,
 		vb_observations,
@@ -1273,7 +1273,69 @@ void TestMergedShapeKeyRootExcludesPairsClaimedByOtherHosts()
 			updated.find(L"hash = ffffffff") == std::wstring::npos &&
 			updated.find(L"hash = cccccccc") != std::wstring::npos &&
 			updated.find(L"hash = dddddddd") != std::wstring::npos,
-		"an active merged host must use the only pair not claimed by another host");
+		"the same assignment rule must use the only unclaimed pair across multiple hosts despite unrelated counts");
+}
+
+void TestUnifiedShapeAssignmentResolvesMultipleActiveVbHosts()
+{
+	const std::wstring source =
+		L"[Constants]\r\n"
+		L"global $mesh_vertex_count_ib0 = 1000\r\n"
+		L"global $mesh_vertex_count_ib1 = 2000\r\n\r\n"
+		L"[TextureOverridePath_ib0]\r\n"
+		L"match_asset_path = /Game/Test/Host0.Host0\r\n"
+		L"$object_detected_ib0 = 1\r\n\r\n"
+		L"[TextureOverridePath_ib1]\r\n"
+		L"match_asset_path = /Game/Test/Host1.Host1\r\n"
+		L"$object_detected_ib1 = 1\r\n\r\n"
+		L"[TextureOverrideComponent0_ib0]\r\n"
+		L"hash = 10101010\r\n"
+		L"match_first_index = 0\r\n"
+		L"match_index_count = 100\r\n"
+		L"$object_detected_ib0 = 1\r\n\r\n"
+		L"[TextureOverrideComponent0_ib1]\r\n"
+		L"hash = 20202020\r\n"
+		L"match_first_index = 500\r\n"
+		L"match_index_count = 200\r\n"
+		L"$object_detected_ib1 = 1\r\n\r\n"
+		L"[TextureOverrideShapeKeyOffsets_ib0]\r\n"
+		L"hash = a0a0a0a0\r\n\r\n"
+		L"[TextureOverrideShapeKeyScale_ib0]\r\n"
+		L"hash = b0b0b0b0\r\n\r\n"
+		L"[TextureOverrideShapeKeyOffsets_ib1]\r\n"
+		L"hash = c0c0c0c0\r\n\r\n"
+		L"[TextureOverrideShapeKeyScale_ib1]\r\n"
+		L"hash = d0d0d0d0\r\n";
+	const VbHashObservationList vb_observations = {
+		{L"", 0x11111111, 0, 100, 1000},
+		{L"", 0x22222222, 500, 200, 2000}};
+	const ShapeKeyHashObservationList shape_observations = {
+		{0xaaaaaaaa, 24000, 0, 3333, 0, true},
+		{0xaaaaaaaa, 24000, 0, 4444, 0, true},
+		{0xbbbbbbbb, 4000, 0, 3333, 1, true},
+		{0xbbbbbbbb, 4000, 0, 4444, 1, true},
+		{0xcccccccc, 48000, 0, 3333, 0, true},
+		{0xcccccccc, 48000, 0, 4444, 0, true},
+		{0xdddddddd, 8000, 0, 3333, 1, true},
+		{0xdddddddd, 8000, 0, 4444, 1, true}};
+	const std::wstring updated = TransformVbHashIniDocument(
+		source,
+		vb_observations,
+		shape_observations,
+		true,
+		0x11111111,
+		1000,
+		{0x11111111, 0x22222222});
+	Require(
+		updated.find(L"hash = 11111111") != std::wstring::npos &&
+			updated.find(L"hash = 22222222") != std::wstring::npos &&
+			updated.find(L"hash = aaaaaaaa") != std::wstring::npos &&
+			updated.find(L"hash = bbbbbbbb") != std::wstring::npos &&
+			updated.find(L"hash = cccccccc") != std::wstring::npos &&
+			updated.find(L"hash = dddddddd") != std::wstring::npos &&
+			updated.find(L"hash = a0a0a0a0") == std::wstring::npos &&
+			updated.find(L"hash = d0d0d0d0") == std::wstring::npos,
+		"one host-to-pair solver must resolve multiple active VB hosts together");
 }
 
 void TestMergedShapeKeyCountDoesNotBlockPrimaryVbRepair()
@@ -1357,7 +1419,8 @@ int main()
 	TestPathlessCurrentModelObservationRepairsOnlyWhenEnabled();
 	TestPathlessCurrentModelAccumulatesMultipleVbFamilies();
 	TestMergedShapeKeyRootsUseVariableCountAndPreserveObservedHostPair();
-	TestMergedShapeKeyRootExcludesPairsClaimedByOtherHosts();
+	TestUnifiedShapeAssignmentUsesUniqueUnclaimedPairAcrossHosts();
+	TestUnifiedShapeAssignmentResolvesMultipleActiveVbHosts();
 	TestMergedShapeKeyCountDoesNotBlockPrimaryVbRepair();
 	std::cout << "asset_hash_ini_document_tests: PASS\n";
 	return 0;

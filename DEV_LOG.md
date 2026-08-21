@@ -1,5 +1,33 @@
 # DEV_LOG
 
+## 2026-08-21 - Unified ShapeKey host-to-pair assignment
+
+- Design correction: the preceding single-host fallback still split ShapeKey
+  resolution into single-VB and merged-host policies. It was not installed and
+  is superseded by one constraint solver shared by every VB topology.
+- Unified rule: runtime resources first form structural offsets/scale pairs
+  only when UAV slots, both 3333/4444 stages, and independently inferred vertex
+  counts agree. Every active INI ShapeKey host then participates in the same
+  one-to-one assignment problem. Existing hashes, configured mesh counts, and
+  observed VB counts contribute evidence but none is a topology-specific
+  authority. Exact current pairs reserve themselves; remaining pairs may be
+  assigned by unique global elimination.
+- Safety boundary: the writer applies replacements only when the host-to-pair
+  assignment has exactly one complete solution. Shared counts, multiple
+  unclaimed pairs, partial stage evidence, conflicting reuse, or replacement
+  conflicts preserve the entire document unchanged instead of relying on host
+  order, character identity, literal hashes, or literal vertex counts.
+- Coverage: the test matrix includes selected-VB versus configured-count
+  disagreement, all counts disagreeing with one unique structural pair,
+  multiple hosts with an exact reserved pair plus one uniquely remaining pair,
+  merged host roots, and single/multiple-pair ambiguity rejection.
+- Verification: native document, workspace lifecycle, capture wakeup, Draw
+  Debug, agent-control, and release-INI contracts pass. `Release|x64` rebuilt
+  with 212 pre-existing warnings and zero errors; DLL SHA256 is
+  `CFE10081F6C971A5E559F5DFAE6D833CBC317757FB688A0352BA6469CDBA0BA2`.
+- Installation: pending game exit. The earlier topology-specific build
+  `7298A046...` will not be installed.
+
 ## 2026-08-21 - Unique ShapeKey pair fallback across Yangyang mod topologies
 
 - Runtime diagnosis: the newly selected Yangyang INI locked the correct

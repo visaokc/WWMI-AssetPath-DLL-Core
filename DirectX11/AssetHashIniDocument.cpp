@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cwctype>
+#include <functional>
 #include <set>
 #include <sstream>
 
@@ -2089,16 +2090,32 @@ std::wstring TransformVbHashIniDocument(
 		i = end;
 	}
 
-	std::map<uint32_t, uint32_t> shape_replacements;
-	std::map<std::wstring, size_t> shape_host_counts;
-	for (const auto& roots : shape_roots)
-		++shape_host_counts[roots.first.first];
+	struct ShapeKeyPairState
+	{
+		uint32_t offsets_hash;
+		uint32_t scale_hash;
+		uint32_t vertex_count;
+	};
+	std::vector<ShapeKeyPairState> observed_pairs;
+	for (const auto& offsets : shape_resources) {
+		if (offsets.second.ambiguous_width || offsets.second.stages != 3 ||
+				!offsets.second.uav0 || offsets.second.byte_width % 24)
+			continue;
+		uint32_t vertex_count = offsets.second.byte_width / 24;
+		for (const auto& scale : shape_resources) {
+			if (scale.first == offsets.first || scale.second.ambiguous_width ||
+					scale.second.stages != 3 || !scale.second.uav1 ||
+					scale.second.byte_width % 4 ||
+					scale.second.byte_width / 4 != vertex_count)
+				continue;
+			observed_pairs.push_back(
+				{offsets.first, scale.first, vertex_count});
+		}
+	}
+
 	std::set<uint32_t> claimed_offsets;
 	std::set<uint32_t> claimed_scales;
 	for (const auto& roots : shape_roots) {
-		auto configured_count = mesh_vertex_counts.find(roots.first.first);
-		if (configured_count == mesh_vertex_counts.end())
-			continue;
 		for (const ShapeKeyRoot& root : roots.second) {
 			auto resource = shape_resources.find(root.old_hash);
 			if (resource == shape_resources.end() ||
@@ -2106,17 +2123,22 @@ std::wstring TransformVbHashIniDocument(
 					resource->second.stages != 3)
 				continue;
 			if (root.offsets && resource->second.uav0 &&
-					resource->second.byte_width ==
-						configured_count->second * 24ull)
+					resource->second.byte_width % 24 == 0)
 				claimed_offsets.insert(root.old_hash);
 			if (!root.offsets && resource->second.uav1 &&
-					resource->second.byte_width ==
-						configured_count->second * 4ull)
+					resource->second.byte_width % 4 == 0)
 				claimed_scales.insert(root.old_hash);
 		}
 	}
+
+	struct ShapeHostCandidate
+	{
+		uint32_t old_offsets;
+		uint32_t old_scale;
+		std::vector<size_t> pairs;
+	};
+	std::vector<ShapeHostCandidate> unresolved_hosts;
 	bool has_target_shape_roots = false;
-	bool target_shape_roots_resolved = true;
 	for (const auto& roots : shape_roots) {
 		uint32_t host_hash = roots.first.second;
 		if (!host_hash) {
@@ -2135,29 +2157,6 @@ std::wstring TransformVbHashIniDocument(
 					selected_target_hashes.end();
 		if (!selected_family && family == replacements.end())
 			continue;
-		uint64_t vertex_count = 0;
-		auto configured_count = mesh_vertex_counts.find(roots.first.first);
-		bool selected_target_family = selected_target_hash == host_hash ||
-			(family != replacements.end() &&
-			 family->second.hash == selected_target_hash);
-		if (selected_target_vertex_count && selected_target_family &&
-				(configured_count == mesh_vertex_counts.end() ||
-				 shape_host_counts[roots.first.first] == 1)) {
-			vertex_count = selected_target_vertex_count;
-		} else if (configured_count != mesh_vertex_counts.end()) {
-			vertex_count = configured_count->second;
-		} else if (family != replacements.end()) {
-			vertex_count = family->second.vertex_count;
-		} else {
-			std::set<uint32_t> host_vertex_counts;
-			for (const VbHashObservation& observation : observations) {
-				if (observation.hash == host_hash && observation.vertex_count)
-					host_vertex_counts.insert(observation.vertex_count);
-			}
-			if (host_vertex_counts.size() != 1)
-				continue;
-			vertex_count = *host_vertex_counts.begin();
-		}
 		has_target_shape_roots = true;
 		size_t offsets_roots = 0;
 		size_t scale_roots = 0;
@@ -2173,101 +2172,112 @@ std::wstring TransformVbHashIniDocument(
 			}
 		}
 		if (offsets_roots != 1 || scale_roots != 1) {
-			target_shape_roots_resolved = false;
-			continue;
+			return source;
 		}
 
-		uint32_t current_offsets = 0;
-		uint32_t current_scale = 0;
-		size_t offsets_matches = 0;
-		size_t scale_matches = 0;
-		auto old_offsets_resource = shape_resources.find(old_offsets);
-		if (old_offsets_resource != shape_resources.end() &&
-				!old_offsets_resource->second.ambiguous_width &&
-				old_offsets_resource->second.uav0 &&
-				old_offsets_resource->second.stages == 3 &&
-				old_offsets_resource->second.byte_width == vertex_count * 24) {
-			current_offsets = old_offsets;
-			offsets_matches = 1;
-		}
-		auto old_scale_resource = shape_resources.find(old_scale);
-		if (old_scale_resource != shape_resources.end() &&
-				!old_scale_resource->second.ambiguous_width &&
-				old_scale_resource->second.uav1 &&
-				old_scale_resource->second.stages == 3 &&
-				old_scale_resource->second.byte_width == vertex_count * 4) {
-			current_scale = old_scale;
-			scale_matches = 1;
-		}
-		for (const auto& resource : shape_resources) {
-			if (resource.second.ambiguous_width ||
-					!resource.second.stages)
-				continue;
-			if (!offsets_matches && resource.second.uav0 &&
-					claimed_offsets.find(resource.first) ==
-						claimed_offsets.end() &&
-					resource.second.stages == 3 &&
-					resource.second.byte_width == vertex_count * 24) {
-				current_offsets = resource.first;
-				++offsets_matches;
-			}
-			if (!scale_matches && resource.second.uav1 &&
-					claimed_scales.find(resource.first) ==
-						claimed_scales.end() &&
-					resource.second.stages == 3 &&
-					resource.second.byte_width == vertex_count * 4) {
-				current_scale = resource.first;
-				++scale_matches;
+		size_t exact_matches = 0;
+		for (size_t pair = 0; pair < observed_pairs.size(); ++pair) {
+			if (observed_pairs[pair].offsets_hash == old_offsets &&
+					observed_pairs[pair].scale_hash == old_scale) {
+				++exact_matches;
 			}
 		}
-		if (!offsets_matches && !scale_matches && selected_target_family &&
-				shape_host_counts[roots.first.first] == 1) {
-			uint32_t paired_offsets = 0;
-			uint32_t paired_scale = 0;
-			size_t paired_matches = 0;
-			for (const auto& offsets_resource : shape_resources) {
-				if (offsets_resource.second.ambiguous_width ||
-						offsets_resource.second.stages != 3 ||
-						!offsets_resource.second.uav0 ||
-						offsets_resource.second.byte_width % 24 ||
-						claimed_offsets.find(offsets_resource.first) !=
-							claimed_offsets.end())
-					continue;
-				uint32_t inferred_count =
-					offsets_resource.second.byte_width / 24;
-				for (const auto& scale_resource : shape_resources) {
-					if (scale_resource.first == offsets_resource.first ||
-							scale_resource.second.ambiguous_width ||
-							scale_resource.second.stages != 3 ||
-							!scale_resource.second.uav1 ||
-							scale_resource.second.byte_width % 4 ||
-							claimed_scales.find(scale_resource.first) !=
-								claimed_scales.end() ||
-							scale_resource.second.byte_width / 4 != inferred_count)
-						continue;
-					paired_offsets = offsets_resource.first;
-					paired_scale = scale_resource.first;
-					++paired_matches;
-				}
-			}
-			if (paired_matches == 1) {
-				current_offsets = paired_offsets;
-				current_scale = paired_scale;
-				offsets_matches = 1;
-				scale_matches = 1;
-			}
-		}
-		if (offsets_matches != 1 || scale_matches != 1) {
-			target_shape_roots_resolved = false;
+		if (exact_matches == 1)
 			continue;
+		if (exact_matches > 1)
+			return source;
+
+		std::set<uint32_t> evidence_counts;
+		auto configured_count = mesh_vertex_counts.find(roots.first.first);
+		if (configured_count != mesh_vertex_counts.end())
+			evidence_counts.insert(configured_count->second);
+		bool selected_target_family = selected_target_hash == host_hash ||
+			(family != replacements.end() &&
+			 family->second.hash == selected_target_hash);
+		if (selected_target_vertex_count && selected_target_family)
+			evidence_counts.insert(selected_target_vertex_count);
+		if (family != replacements.end() && family->second.vertex_count)
+			evidence_counts.insert(family->second.vertex_count);
+		for (const VbHashObservation& observation : observations) {
+			if (observation.hash == host_hash && observation.vertex_count)
+				evidence_counts.insert(observation.vertex_count);
 		}
-		if (current_offsets != old_offsets)
-			shape_replacements[old_offsets] = current_offsets;
-		if (current_scale != old_scale)
-			shape_replacements[old_scale] = current_scale;
+
+		ShapeHostCandidate host = {old_offsets, old_scale, {}};
+		for (size_t pair = 0; pair < observed_pairs.size(); ++pair) {
+			const ShapeKeyPairState& candidate = observed_pairs[pair];
+			if ((candidate.offsets_hash != old_offsets &&
+					claimed_offsets.find(candidate.offsets_hash) !=
+						claimed_offsets.end()) ||
+					(candidate.scale_hash != old_scale &&
+					 claimed_scales.find(candidate.scale_hash) !=
+						claimed_scales.end()))
+				continue;
+			if (evidence_counts.find(candidate.vertex_count) !=
+					evidence_counts.end())
+				host.pairs.push_back(pair);
+		}
+		if (host.pairs.empty()) {
+			for (size_t pair = 0; pair < observed_pairs.size(); ++pair) {
+				const ShapeKeyPairState& candidate = observed_pairs[pair];
+				if ((candidate.offsets_hash == old_offsets ||
+						claimed_offsets.find(candidate.offsets_hash) ==
+							claimed_offsets.end()) &&
+						(candidate.scale_hash == old_scale ||
+						 claimed_scales.find(candidate.scale_hash) ==
+							claimed_scales.end()))
+					host.pairs.push_back(pair);
+			}
+		}
+		if (host.pairs.empty())
+			return source;
+		unresolved_hosts.push_back(host);
 	}
-	if (has_target_shape_roots && !target_shape_roots_resolved)
+
+	std::sort(unresolved_hosts.begin(), unresolved_hosts.end(),
+		[](const ShapeHostCandidate& left, const ShapeHostCandidate& right) {
+			return left.pairs.size() < right.pairs.size();
+		});
+	std::vector<size_t> assignment(unresolved_hosts.size(), observed_pairs.size());
+	std::vector<size_t> unique_assignment;
+	std::vector<bool> used_pairs(observed_pairs.size(), false);
+	size_t solution_count = 0;
+	std::function<void(size_t)> solve = [&](size_t host_index) {
+		if (solution_count > 1)
+			return;
+		if (host_index == unresolved_hosts.size()) {
+			++solution_count;
+			if (solution_count == 1)
+				unique_assignment = assignment;
+			return;
+		}
+		for (size_t pair : unresolved_hosts[host_index].pairs) {
+			if (used_pairs[pair])
+				continue;
+			used_pairs[pair] = true;
+			assignment[host_index] = pair;
+			solve(host_index + 1);
+			used_pairs[pair] = false;
+		}
+	};
+	solve(0);
+	if (has_target_shape_roots && solution_count != 1)
 		return source;
+
+	std::map<uint32_t, uint32_t> shape_replacements;
+	for (size_t host = 0; host < unresolved_hosts.size(); ++host) {
+		const ShapeHostCandidate& candidate = unresolved_hosts[host];
+		const ShapeKeyPairState& pair = observed_pairs[unique_assignment[host]];
+		auto add_replacement = [&](uint32_t old_hash, uint32_t new_hash) {
+			if (old_hash == new_hash)
+				return true;
+			auto inserted = shape_replacements.insert({old_hash, new_hash});
+			return inserted.second || inserted.first->second == new_hash;
+		};
+		if (!add_replacement(candidate.old_offsets, pair.offsets_hash) ||
+				!add_replacement(candidate.old_scale, pair.scale_hash))
+			return source;
+	}
 
 	if (!shape_replacements.empty()) {
 		for (size_t i = 0; i < lines.size();) {
