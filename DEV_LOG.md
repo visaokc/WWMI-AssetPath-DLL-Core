@@ -31,8 +31,12 @@
   `268ADD3DC755BB8DF9454A70D6207FF16EDCA0F8F7A88740616EA1660A0641D7`.
 - Runtime boundary: only families that actually enter a draw during the active
   F7 session can be accumulated. An inactive outfit/LOD remains untouched
-  until that state is shown. Live Daniya acceptance is pending installation
-  and user-driven scene/LOD switching.
+  until that state is shown. Live Daniya acceptance remains pending
+  user-driven scene/LOD switching.
+- Installation: after confirming the game process was absent, the verified DLL
+  was copied to `D:\WWMI\d3d11.dll`; its SHA256 matches the build. The previous
+  DLL, `d3dx.ini`, and Daniya test INI were copied without modification to
+  `D:\WWMI\Backups\MultiFamilyCapture-20260821-104721`.
 
 ## 2026-08-20 - Already-current VB ShapeKey anchor
 
