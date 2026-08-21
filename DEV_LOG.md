@@ -1,5 +1,37 @@
 # DEV_LOG
 
+## 2026-08-21 - Mixed single-host and merged-host ShapeKey sizing
+
+- Runtime diagnosis: Daniya Path Cleanup correctly selected current VB
+  `8287b2f2` with native vertex count `80247` and observed all eight active
+  primary-LOD draw ranges, but the document remained unchanged after those
+  component hashes were intentionally replaced with `45856454`. The active
+  ShapeKey pair `91655d64` / `ac615568` uses the merged mod mesh count `334686`,
+  so the preceding single-VB authority fix sized it against `80247` and the
+  atomic ShapeKey gate rejected the otherwise deterministic VB repair.
+- Fix: ShapeKey sizing now distinguishes variables with one host from variables
+  with multiple host roots. A single-host variable retains authoritative native
+  selected-VB sizing for YangYang; a merged variable uses its configured
+  `$mesh_vertex_count[_ibN]` so Daniya's aggregate buffers do not block VB,
+  FoldHost, or LOD-family repair.
+- Coverage boundary: every observed target-family draw signature remains
+  repairable in the same capture session. The current frame exposed only the
+  `8287b2f2` primary family; inactive `dedb18e8` LOD1 and alternate FoldHost
+  families remain untouched until their states actually enter a draw.
+- Regression coverage: native tests now explicitly combine a changed primary
+  VB, a selected native count that differs from the merged configured count,
+  and multiple same-variable ShapeKey hosts. All single-VB and multi-family
+  tests pass. A replay against the live Daniya document repairs all eight
+  `45856454` component hashes to `8287b2f2`, preserves all four `dedb18e8` LOD1
+  hashes, and preserves the already-current ShapeKey pair.
+- Verification: capture wakeup, Draw Debug, agent-control, and release-INI
+  contracts pass. `Release|x64` rebuilt with 212 pre-existing warnings and zero
+  errors; DLL SHA256 is
+  `1B5DDD853A358993E7C898852BBF7D236652E8671CB59F688E621C334ABB2BF8`.
+- Installation: pending game exit. The running game still uses the prior DLL;
+  no live INI was manually edited. The temporary diagnostic frame dump and
+  replay build were removed after evidence extraction.
+
 ## 2026-08-21 - Restore selected single-VB ShapeKey authority
 
 - Regression: the multi-family ShapeKey sizing route preferred the INI's

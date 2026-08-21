@@ -2090,6 +2090,9 @@ std::wstring TransformVbHashIniDocument(
 	}
 
 	std::map<uint32_t, uint32_t> shape_replacements;
+	std::map<std::wstring, size_t> shape_host_counts;
+	for (const auto& roots : shape_roots)
+		++shape_host_counts[roots.first.first];
 	std::set<uint32_t> claimed_offsets;
 	std::set<uint32_t> claimed_scales;
 	for (const auto& roots : shape_roots) {
@@ -2134,10 +2137,12 @@ std::wstring TransformVbHashIniDocument(
 			continue;
 		uint64_t vertex_count = 0;
 		auto configured_count = mesh_vertex_counts.find(roots.first.first);
-		if (selected_target_vertex_count &&
-				(selected_target_hash == host_hash ||
-				 (family != replacements.end() &&
-				  family->second.hash == selected_target_hash))) {
+		bool selected_target_family = selected_target_hash == host_hash ||
+			(family != replacements.end() &&
+			 family->second.hash == selected_target_hash);
+		if (selected_target_vertex_count && selected_target_family &&
+				(configured_count == mesh_vertex_counts.end() ||
+				 shape_host_counts[roots.first.first] == 1)) {
 			vertex_count = selected_target_vertex_count;
 		} else if (configured_count != mesh_vertex_counts.end()) {
 			vertex_count = configured_count->second;

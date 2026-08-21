@@ -1134,7 +1134,7 @@ void TestMergedShapeKeyRootsUseVariableCountAndPreserveObservedHostPair()
 		L"[TextureOverrideShapeKeyScale_22222222_ib0]\r\n"
 		L"hash = dddddddd\r\n";
 	const VbHashObservationList vb_observations = {
-		{L"", 0x11111111, 0, 100, 1000}};
+		{L"", 0x11111111, 0, 100, 123}};
 	const ShapeKeyHashObservationList shape_observations = {
 		{0xaaaaaaaa, 24000, 0, 3333, 0, true},
 		{0xaaaaaaaa, 24000, 0, 4444, 0, true},
@@ -1150,7 +1150,7 @@ void TestMergedShapeKeyRootsUseVariableCountAndPreserveObservedHostPair()
 		shape_observations,
 		true,
 		0x11111111,
-		1000);
+		123);
 	Require(
 		updated == source,
 		"an observed active host pair must remain valid beside same-sized merged host pairs");
@@ -1178,7 +1178,7 @@ void TestMergedShapeKeyRootExcludesPairsClaimedByOtherHosts()
 		L"[TextureOverrideShapeKeyScale_22222222_ib0]\r\n"
 		L"hash = dddddddd\r\n";
 	const VbHashObservationList vb_observations = {
-		{L"", 0x11111111, 0, 100, 1000}};
+		{L"", 0x11111111, 0, 100, 123}};
 	const ShapeKeyHashObservationList shape_observations = {
 		{0xaaaaaaaa, 24000, 0, 3333, 0, true},
 		{0xaaaaaaaa, 24000, 0, 4444, 0, true},
@@ -1194,7 +1194,7 @@ void TestMergedShapeKeyRootExcludesPairsClaimedByOtherHosts()
 		shape_observations,
 		true,
 		0x11111111,
-		1000,
+		123,
 		{0x11111111});
 	Require(
 		updated.find(L"hash = aaaaaaaa") != std::wstring::npos &&
@@ -1204,6 +1204,54 @@ void TestMergedShapeKeyRootExcludesPairsClaimedByOtherHosts()
 			updated.find(L"hash = cccccccc") != std::wstring::npos &&
 			updated.find(L"hash = dddddddd") != std::wstring::npos,
 		"an active merged host must use the only pair not claimed by another host");
+}
+
+void TestMergedShapeKeyCountDoesNotBlockPrimaryVbRepair()
+{
+	const std::wstring source =
+		L"[Constants]\r\n"
+		L"global $mesh_vertex_count_ib0 = 1000\r\n\r\n"
+		L"[TextureOverridePath]\r\n"
+		L"match_asset_path = /Game/Test/Merged.Merged\r\n"
+		L"$object_detected_ib0 = 1\r\n\r\n"
+		L"[TextureOverrideComponent0_ib0]\r\n"
+		L"hash = aaaaaaaa\r\n"
+		L"match_first_index = 0\r\n"
+		L"match_index_count = 100\r\n"
+		L"$object_detected_ib0 = 1\r\n\r\n"
+		L"[TextureOverrideShapeKeyOffsets_ib0]\r\n"
+		L"hash = bbbbbbbb\r\n\r\n"
+		L"[TextureOverrideShapeKeyScale_ib0]\r\n"
+		L"hash = cccccccc\r\n\r\n"
+		L"[TextureOverrideShapeKeyOffsets_22222222_ib0]\r\n"
+		L"hash = dddddddd\r\n\r\n"
+		L"[TextureOverrideShapeKeyScale_22222222_ib0]\r\n"
+		L"hash = eeeeeeee\r\n";
+	const VbHashObservationList vb_observations = {
+		{L"", 0x11111111, 0, 100, 123}};
+	const ShapeKeyHashObservationList shape_observations = {
+		{0xbbbbbbbb, 24000, 0, 3333, 0, true},
+		{0xbbbbbbbb, 24000, 0, 4444, 0, true},
+		{0xcccccccc, 4000, 0, 3333, 1, true},
+		{0xcccccccc, 4000, 0, 4444, 1, true},
+		{0xdddddddd, 24000, 0, 3333, 0, true},
+		{0xdddddddd, 24000, 0, 4444, 0, true},
+		{0xeeeeeeee, 4000, 0, 3333, 1, true},
+		{0xeeeeeeee, 4000, 0, 4444, 1, true}};
+	const std::wstring updated = TransformVbHashIniDocument(
+		source,
+		vb_observations,
+		shape_observations,
+		true,
+		0x11111111,
+		123,
+		{0x11111111});
+	Require(
+		updated.find(L"hash = 11111111") != std::wstring::npos &&
+			updated.find(L"hash = aaaaaaaa") == std::wstring::npos &&
+			updated.find(L"hash = bbbbbbbb") != std::wstring::npos &&
+			updated.find(L"hash = cccccccc") != std::wstring::npos,
+		"a merged ShapeKey count must not atomically block primary VB repair");
 }
 
 int main()
@@ -1238,6 +1286,7 @@ int main()
 	TestPathlessCurrentModelAccumulatesMultipleVbFamilies();
 	TestMergedShapeKeyRootsUseVariableCountAndPreserveObservedHostPair();
 	TestMergedShapeKeyRootExcludesPairsClaimedByOtherHosts();
+	TestMergedShapeKeyCountDoesNotBlockPrimaryVbRepair();
 	std::cout << "asset_hash_ini_document_tests: PASS\n";
 	return 0;
 }
