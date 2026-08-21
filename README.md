@@ -19,33 +19,36 @@ automation.
 The root commit contains only the upstream files needed by the `DirectX11`
 project and its direct build dependencies.
 
-## Current release: v1.0.3
+## Current release: v1.0.4
 
-v1.0.3 fixes the release package and stabilizes Draw Debug:
+v1.0.4 makes F7 repair workspace-scoped and topology-independent:
 
-- **Consistent section names:** Path mode always writes
-  `[TextureOverride_<name>]`; Hash mode always writes
-  `[TextureOverride_Texture_<hash>]`, regardless of the author's original name.
-- **Restored Hash priority:** generated Hash sections automatically receive
-  `match_priority = 0` when no priority was explicitly provided.
-- **Correct WWMI configuration:** the packaged INI is the verified live WWMI
-  configuration, including the correct game target, WWMI Core include, Mods
-  include, F7 bindings, and strict UTF-8 encoding.
-- **Stable Draw Debug:** Draw Debug is enabled by default, but creates no
-  background threads while the game starts. Its pipe and writer threads now
-  exist only while Hunting or capture actually needs them and shut down cleanly.
+- **Persistent workspace:** the first active F7 capture locks the current model
+  and its controlling INI. F10 preserves that workspace while F7 remains active;
+  turn F7 off and then press F10 to clear it before selecting another model.
+- **Complete write isolation:** texture Hash/Path/mip conversion and
+  VB/Component/ShapeKey/LOD repair can write only the locked INI, preventing
+  unrelated loaded Mods from being changed.
+- **Unified VB topology handling:** single-VB and multi-VB Mods use the same
+  structural host-to-pair solver. All active VB families are accumulated, and
+  ShapeKey resources are changed only when the complete assignment is unique.
+- **Fail-closed ambiguity:** conflicting ShapeKey pairs, incomplete stage
+  evidence, or non-unique mappings preserve the document instead of guessing.
+- **Public diagnostic default:** Draw Debug remains available but is disabled
+  in the supplied INI. Set `[DrawDebug] enabled = true` only when diagnostics
+  are needed.
 
 Release checksums:
 
 ```text
 d3d11.dll
-8F46A23E834A25E5170B9141EBBC2994FA5C6D8F25C66274DCFEA8D4A3DFBC03
+CFE10081F6C971A5E559F5DFAE6D833CBC317757FB688A0352BA6469CDBA0BA2
 
 d3dx.ini
-1E14D07F4ECDA067DA018793BD3CC40725D4E45064533BDE9710937ED31AB547
+94459D09BB116B2388153F41AF803369FF0717F9F49A24F50DCD86E79820BC50
 
-WWMI-AssetPath-DLL-v1.0.3.zip
-4DAE4D02AB22165C19A7CDDEC805003B25301C6C569F323009E888E5219CD545
+WWMI-AssetPath-DLL-v1.0.4.zip
+40B6C18CFE501591625F47D884637A9E0B42908341580693E74B4AB1B174E5A6
 ```
 
 ## Download
@@ -75,7 +78,7 @@ The ZIP contains `d3d11.dll` and `d3dx.ini`.
 | `Shift+F7` | Aggressive | Starts aggressive mode from OFF or switches directly from Backup. The loaded `mod.ini` is updated in place through an atomic replacement. Pressing `Shift+F7` again turns aggressive mode OFF. |
 | `Ctrl+F7` | Path conversion | Converts currently validated Hash overrides to one active `match_asset_path` override in place. Unverified Hashes and their Mip metadata remain inside the same `asset-hash-stream` block for debugging and later automatic repair. |
 | `Alt+F7` | Path cleanup | Uses the same runtime Path validation as Ctrl+F7, but removes every stored Hash section from a validated `asset-hash-stream` block and leaves only its active Path section. |
-| `F10` | Reload | Reloads mod configuration after an INI has been updated or replaced. |
+| `F10` | Reload/workspace reset | Reloads Mod configuration. While an F7 mode is active, the locked model and INI remain selected. With F7 off, F10 clears the workspace so the next F7 can lock another model. |
 
 The active mode is shown at the top centre of the game window:
 
@@ -119,15 +122,14 @@ preserved.
 
 Draw Debug is a bounded FrameAnalysis profile for investigating all
 draws involved in a modded character, including otherwise separate effect,
-parallax, shadow, depth, and motion-vector passes. It is enabled by default in
-the supplied INI but remains inactive until Hunting and F11/agent control
-actually request capture.
+parallax, shadow, depth, and motion-vector passes. It is disabled by default in
+the supplied public INI and can be enabled explicitly for diagnostics.
 
 Default configuration:
 
 ```ini
 [DrawDebug]
-enabled = true
+enabled = false
 toggle = no_modifiers VK_F11
 long_press_ms = 1000
 max_queue_records = 65536
@@ -338,16 +340,17 @@ Hash-to-Path resolution before conversion.
 
 ## 中文使用说明
 
-### v1.0.3 更新简报
+### v1.0.4 更新简报
 
-- **统一 section 名：**Path 模式固定写成 `[TextureOverride_<name>]`，Hash 模式固定写成
-  `[TextureOverride_Texture_<hash>]`，不再继承作者原本的自定义命名。
-- **补回 Hash 优先级：**生成 Hash section 时，如果原本没有 priority，会自动补上
-  `match_priority = 0`。
-- **修复发布包：**包内 `d3dx.ini` 直接采用已经实测可用的本地 WWMI 配置，修复编码错误、
-  目标程序错误和缺少 WWMI Core include 导致 Mod 无法加载的问题。
-- **稳定 Draw Debug：**功能默认开启，但游戏启动时不再创建后台线程；只在进入 Hunting
-  或实际捕获时按需启动，并在结束后正确关闭，避免游戏初期偶发闪退。
+- **工作空间锁定：**首次开启 F7 时锁定当前主控模型与对应 INI。F7 开启期间按 F10
+  只刷新 Mod，不切换工作空间；关闭 F7 后按 F10 才清空工作空间。
+- **完整写入隔离：**贴图 Hash/Path/Mip 与 VB、Component、ShapeKey、LOD 修复只能写入
+  已锁定的 INI，避免误改同时加载的其它 Mod。
+- **统一 VB 规则：**单 VB 和多 VB 共用同一个 host-to-pair 约束匹配器；覆盖当前实际
+  绘制的全部 VB family，只在 ShapeKey 全局映射唯一时写入。
+- **歧义时拒绝猜测：**多个 ShapeKey 候选、阶段证据不完整或资源冲突时保持原文件。
+- **公开包关闭 Draw Debug：**诊断功能仍保留，但包内默认 `enabled = false`；需要抓取
+  Draw Debug 时再手动开启。
 
 ### 安装
 
@@ -373,6 +376,8 @@ Hash-to-Path resolution before conversion.
 - `Alt+F7`：开启 Path 清理模式；验证 Path 有效后，删除对应
   `asset-hash-stream` 块内全部 Hash section，只留一条 active Path section。
   未通过当前运行时 Path 验证的生成块保持原样。
+- `F10`：刷新 Mod。F7 模式开启时保留当前模型和 INI 工作空间；关闭 F7 后按 F10
+  才清空工作空间，下一次 F7 可以锁定另一角色。
 - `F10`：重新加载修改或替换后的 INI。
 
 ### Path/Name 简写

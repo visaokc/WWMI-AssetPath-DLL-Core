@@ -54,8 +54,8 @@ $drawDebugMatch = [regex]::Match(
 if (-not $drawDebugMatch.Success) {
     throw 'Release d3dx.ini must contain [DrawDebug]'
 }
-if ($drawDebugMatch.Value -notmatch '(?mi)^\s*enabled\s*=\s*true\s*$') {
-    throw 'Release d3dx.ini must enable the lazy Draw Debug lifecycle by default'
+if ($drawDebugMatch.Value -notmatch '(?mi)^\s*enabled\s*=\s*false\s*$') {
+    throw 'Release d3dx.ini must keep Draw Debug disabled by default'
 }
 
 if ($text -match '(?mi)^\s*(?:target|include|include_recursive)\s*=\s*(?:Game\.exe|Core\\EFMI\\|Core\\ZZMI\\)') {

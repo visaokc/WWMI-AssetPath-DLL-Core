@@ -1,5 +1,33 @@
 # DEV_LOG
 
+## 2026-08-21 - v1.0.4 workspace-isolated unified repair release
+
+- Runtime acceptance: with the unified build installed, a fresh Yangyang F7
+  session repaired all seven ranged Component hashes from `15fb50a9` to
+  `efd45ce3` and replaced the complete ShapeKey set with `1a646636` /
+  `6fe81411`. The unranged `TextureOverrideCheck` detection entry correctly
+  retained its old hash because it has no VB draw signature and is outside the
+  safe Component mapping contract. The user confirmed every repairable entry
+  succeeded in game.
+- Release behavior: v1.0.4 documents the persistent F7 model/INI workspace,
+  F7-active versus F7-off F10 lifecycle, INI-wide texture and geometry write
+  isolation, and the topology-independent ShapeKey assignment rule.
+- Public configuration: `Dependencies/d3dx.ini` was refreshed from the verified
+  live WWMI configuration, retained the game/Core/Mods/F7 contract, and changed
+  only `[DrawDebug] enabled` to `false` for the public package. The release
+  contract now enforces that disabled default.
+- Verification: native document, workspace lifecycle, capture wakeup, Draw
+  Debug, agent-control, and release-INI tests pass. The release ZIP contains
+  only root-level `d3d11.dll` and `d3dx.ini`; extracted hashes match their source
+  files and the extracted INI passes the complete strict UTF-8 WWMI contract.
+- Package: `_archive/zip-packages/WWMI-AssetPath-DLL-v1.0.4.zip`.
+  `d3d11.dll` SHA256:
+  `CFE10081F6C971A5E559F5DFAE6D833CBC317757FB688A0352BA6469CDBA0BA2`;
+  `d3dx.ini` SHA256:
+  `94459D09BB116B2388153F41AF803369FF0717F9F49A24F50DCD86E79820BC50`;
+  ZIP SHA256:
+  `40B6C18CFE501591625F47D884637A9E0B42908341580693E74B4AB1B174E5A6`.
+
 ## 2026-08-21 - Unified ShapeKey host-to-pair assignment
 
 - Design correction: the preceding single-host fallback still split ShapeKey
