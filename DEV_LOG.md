@@ -1,5 +1,39 @@
 # DEV_LOG
 
+## 2026-08-21 - Target-INI multi-family capture
+
+- Scope: extend the established current-model repair route from one selected
+  VB0 to multiple independently appearing VB/FoldHost/LOD families in the same
+  target INI, without broadening capture to other characters or scene draws.
+- Capture: after the initial draw-signature lock selects one target INI, the
+  session retains the original fast path and may add another VB hash only when
+  an observed signature belongs uniquely to that target or its accumulated
+  target score beats every competing source. Unknown draws with no target
+  signature are discarded before model-signature state is expanded. The
+  writer receives the complete selected-family set, and diagnostics expose its
+  bounded count as `target_families`.
+- Transformation: all actually observed target families can now be repaired in
+  one document pass while unseen families remain unchanged. ShapeKey sizing is
+  resolved per `$object_detected[_ibN]` from the corresponding
+  `$mesh_vertex_count[_ibN]`, rather than applying one selected VB buffer count
+  to every merged family.
+- ShapeKey isolation: an already-current offsets/scale pair is accepted even
+  when another host has buffers of the same size. Correct pairs claimed by
+  other roots are excluded from a changed active host's candidates, allowing a
+  unique remaining pair to repair without cross-host substitution. Ambiguous
+  or incomplete active pairs still preserve the original document atomically.
+- Regression coverage: native tests now cover two VB families repaired in one
+  target INI with an unseen third family preserved, multiple same-sized
+  ShapeKey host pairs, per-IB mesh counts, and exclusion of another host's
+  claimed pair. All pre-existing single-VB document tests and static capture,
+  Draw Debug, agent-control, and release-INI contracts pass. `Release|x64`
+  rebuilt with 212 pre-existing warnings and zero errors; DLL SHA256 is
+  `268ADD3DC755BB8DF9454A70D6207FF16EDCA0F8F7A88740616EA1660A0641D7`.
+- Runtime boundary: only families that actually enter a draw during the active
+  F7 session can be accumulated. An inactive outfit/LOD remains untouched
+  until that state is shown. Live Daniya acceptance is pending installation
+  and user-driven scene/LOD switching.
+
 ## 2026-08-20 - Already-current VB ShapeKey anchor
 
 - Runtime proof: after restarting capture with YangYang as the controlled model,

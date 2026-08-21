@@ -59,6 +59,7 @@ std::map<uint32_t, std::set<std::pair<uint32_t, uint32_t>>>
 std::map<uint32_t, std::map<std::wstring, size_t>> model_source_scores;
 std::wstring target_source_file;
 uint32_t target_vb_hash = 0;
+std::set<uint32_t> target_vb_hashes;
 uint32_t target_vertex_count = 0;
 bool target_profile_loaded = false;
 AssetHashObservationMap captured_hashes;
@@ -103,6 +104,7 @@ void ResetCaptureSessionLocked()
 	model_source_scores.clear();
 	target_source_file.clear();
 	target_vb_hash = 0;
+	target_vb_hashes.clear();
 	target_vertex_count = 0;
 	target_profile_loaded = false;
 	observed_name_paths.clear();
@@ -633,6 +635,7 @@ void WriteSnapshot(
 	const std::wstring& target_source,
 	uint32_t selected_target_hash,
 	uint32_t selected_target_vertex_count,
+	const std::set<uint32_t>& selected_target_hashes,
 	CaptureMode mode)
 {
 	static const std::wstring game_version = []() {
@@ -686,7 +689,8 @@ void WriteSnapshot(
 				shape_key_observations,
 				true,
 				selected_target_hash,
-				selected_target_vertex_count);
+				selected_target_vertex_count,
+				selected_target_hashes);
 		}
 		if (transformed == previous)
 			continue;
@@ -733,6 +737,7 @@ DWORD WINAPI CaptureWriterThread(void *)
 		std::wstring target_source;
 		uint32_t selected_target_hash = 0;
 		uint32_t selected_target_vertex_count = 0;
+		std::set<uint32_t> selected_target_hashes;
 		CaptureMode mode = CaptureMode::Off;
 		AcquireSRWLockExclusive(&capture_lock);
 		if (capture_mode == CaptureMode::Off || !capture_dirty) {
@@ -748,6 +753,7 @@ DWORD WINAPI CaptureWriterThread(void *)
 		target_source = target_source_file;
 		selected_target_hash = target_vb_hash;
 		selected_target_vertex_count = target_vertex_count;
+		selected_target_hashes = target_vb_hashes;
 		PruneReleasedRecentAssets(GetTickCount64());
 		legacy_hash_identities = BuildLegacyHashIdentitySnapshot();
 		ambiguous_hashes = BuildAmbiguousHashSnapshot();
@@ -765,6 +771,7 @@ DWORD WINAPI CaptureWriterThread(void *)
 			target_source,
 			selected_target_hash,
 			selected_target_vertex_count,
+			selected_target_hashes,
 			mode);
 	}
 }
@@ -1235,27 +1242,40 @@ bool AssetHashCaptureNeedsVbObservation(
 	uint32_t vertex_count)
 {
 	std::wstring activated_source;
+	uint32_t activated_hash = 0;
 	uint32_t activated_vertex_count = 0;
+	uint32_t added_family_hash = 0;
 	bool signal_writer = false;
 	AcquireSRWLockExclusive(&capture_lock);
-	if (capture_mode != CaptureMode::Off && target_source_file.empty()) {
-		if (vertex_count)
-			model_vertex_counts[hash] = vertex_count;
+	if (capture_mode != CaptureMode::Off) {
 		const auto draw_signature = std::make_pair(first_index, index_count);
+		auto sources = model_draw_signature_sources.find(draw_signature);
+		bool target_signature = target_source_file.empty() ||
+			target_vb_hashes.find(hash) != target_vb_hashes.end();
+		if (!target_signature &&
+				sources != model_draw_signature_sources.end()) {
+			for (const std::wstring& source : sources->second) {
+				if (!_wcsicmp(source.c_str(), target_source_file.c_str())) {
+					target_signature = true;
+					break;
+				}
+			}
+		}
+		if (target_signature && vertex_count)
+			model_vertex_counts[hash] = vertex_count;
 		bool signature_added = false;
-		if (hash && index_count &&
+		if (target_signature && hash && index_count &&
 				model_draw_signatures[hash].insert(draw_signature).second) {
 			signature_added = true;
-			auto sources = model_draw_signature_sources.find(draw_signature);
 			if (sources != model_draw_signature_sources.end()) {
 				for (const std::wstring& source : sources->second)
 					++model_source_scores[hash][source];
 			}
 		}
-		std::wstring candidate;
-		size_t candidate_score = 0;
-		bool ambiguous = false;
-		if (signature_added) {
+		if (target_source_file.empty() && signature_added) {
+			std::wstring candidate;
+			size_t candidate_score = 0;
+			bool ambiguous = false;
 			for (const auto& score : model_source_scores[hash]) {
 				auto count = model_draw_signature_counts.find(score.first);
 				if (count == model_draw_signature_counts.end())
@@ -1273,22 +1293,53 @@ bool AssetHashCaptureNeedsVbObservation(
 					ambiguous = true;
 				}
 			}
-		}
-		if (!candidate.empty() && !ambiguous) {
-			target_source_file = candidate;
-			target_vb_hash = hash;
-			target_vertex_count = model_vertex_counts[hash];
-			target_profile_loaded = false;
-			vb_probe_keys.clear();
-			capture_dirty = true;
-			signal_writer = true;
-			activated_source = target_source_file;
-			activated_vertex_count = target_vertex_count;
+			if (!candidate.empty() && !ambiguous) {
+				target_source_file = candidate;
+				target_vb_hash = hash;
+				target_vb_hashes.insert(hash);
+				target_vertex_count = model_vertex_counts[hash];
+				target_profile_loaded = false;
+				vb_probe_keys.clear();
+				capture_dirty = true;
+				signal_writer = true;
+				activated_source = target_source_file;
+				activated_hash = hash;
+				activated_vertex_count = target_vertex_count;
+			}
+		} else if (!target_source_file.empty() && signature_added &&
+				target_vb_hashes.find(hash) == target_vb_hashes.end()) {
+			auto sources = model_draw_signature_sources.find(draw_signature);
+			bool unique_target_signature =
+				sources != model_draw_signature_sources.end() &&
+				sources->second.size() == 1 &&
+				!_wcsicmp(
+					sources->second.begin()->c_str(),
+					target_source_file.c_str());
+			auto scores = model_source_scores.find(hash);
+			size_t target_score = 0;
+			size_t competing_score = 0;
+			if (scores != model_source_scores.end()) {
+				for (const auto& score : scores->second) {
+					if (!_wcsicmp(
+							score.first.c_str(), target_source_file.c_str()))
+						target_score = score.second;
+					else if (score.second > competing_score)
+						competing_score = score.second;
+				}
+			}
+			if (unique_target_signature ||
+					(target_score >= 2 && target_score > competing_score)) {
+				target_vb_hashes.insert(hash);
+				added_family_hash = hash;
+				capture_dirty = true;
+				signal_writer = true;
+			}
 		}
 	}
 	const auto key = std::make_tuple(hash, first_index, index_count);
 	bool needed = capture_mode != CaptureMode::Off &&
-		!target_source_file.empty() && hash == target_vb_hash &&
+		!target_source_file.empty() &&
+		target_vb_hashes.find(hash) != target_vb_hashes.end() &&
 		vb_probe_keys.insert(key).second;
 	ReleaseSRWLockExclusive(&capture_lock);
 	if (!activated_source.empty())
@@ -1296,8 +1347,12 @@ bool AssetHashCaptureNeedsVbObservation(
 			"> Asset Hash Capture selected current model INI: %ls "
 			"(VB0=%08x, vertices=%u)\n",
 			activated_source.c_str(),
-			hash,
+			activated_hash,
 			activated_vertex_count);
+	if (added_family_hash)
+		LogInfo(
+			"> Asset Hash Capture added current model VB family: %08x\n",
+			added_family_hash);
 	if (signal_writer)
 		SignalWriter();
 	return needed;
@@ -1328,15 +1383,17 @@ std::string AssetHashCaptureDiagnosticsJson()
 {
 	std::string json;
 	AcquireSRWLockShared(&capture_lock);
-	char header[384];
+	char header[448];
 	sprintf_s(
 		header,
 		"\"mode\":%u,\"target_vb\":\"%08x\",\"target_vertices\":%u,"
-		"\"vb_observations\":%llu,\"shape_probes\":%llu,"
+		"\"target_families\":%llu,\"vb_observations\":%llu,"
+		"\"shape_probes\":%llu,"
 		"\"shape_observations\":%llu,\"shape\":[",
 		static_cast<unsigned>(capture_mode),
 		target_vb_hash,
 		target_vertex_count,
+		static_cast<unsigned long long>(target_vb_hashes.size()),
 		static_cast<unsigned long long>(captured_vb_hashes.size()),
 		static_cast<unsigned long long>(shape_key_probe_keys.size()),
 		static_cast<unsigned long long>(captured_shape_key_hashes.size()));

@@ -14,6 +14,9 @@ $body = $source.Substring($begin, $end - $begin)
 $contracts = @(
     'capture_dirty = true;',
     'signal_writer = true;',
+    'target_vb_hashes.insert(hash);',
+    'unique_target_signature',
+    'target_vb_hashes.find(hash) != target_vb_hashes.end()',
     'if (signal_writer)',
     'SignalWriter();'
 )
