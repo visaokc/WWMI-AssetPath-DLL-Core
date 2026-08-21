@@ -85,9 +85,11 @@ struct RecentAssetHistory
 std::map<std::wstring, RecentAssetHistory> recent_assets;
 std::map<uintptr_t, std::wstring> active_recent_resources;
 size_t recent_observation_count = 0;
+uint64_t workspace_generation = 0;
 
 void ResetCaptureSessionLocked()
 {
+	++workspace_generation;
 	captured_hashes.clear();
 	captured_observation_count = 0;
 	captured_vb_hashes.clear();
@@ -650,7 +652,11 @@ void WriteSnapshot(
 			detected.c_str());
 		return detected;
 	}();
+	if (target_source.empty())
+		return;
 	for (const std::wstring& source_path : sources) {
+		if (_wcsicmp(source_path.c_str(), target_source.c_str()))
+			continue;
 		std::wstring source;
 		if (!ReadUtf8File(source_path, &source))
 			continue;
@@ -681,17 +687,14 @@ void WriteSnapshot(
 				legacy_hash_identities,
 				ambiguous_hashes,
 				game_version);
-		if (!target_source.empty() &&
-				!_wcsicmp(source_path.c_str(), target_source.c_str())) {
-			transformed = TransformVbHashIniDocument(
-				transformed,
-				vb_observations,
-				shape_key_observations,
-				true,
-				selected_target_hash,
-				selected_target_vertex_count,
-				selected_target_hashes);
-		}
+		transformed = TransformVbHashIniDocument(
+			transformed,
+			vb_observations,
+			shape_key_observations,
+			true,
+			selected_target_hash,
+			selected_target_vertex_count,
+			selected_target_hashes);
 		if (transformed == previous)
 			continue;
 		if (!AtomicWriteUtf8(output_path, transformed)) {
@@ -875,7 +878,6 @@ void ToggleAssetHashCapture(HackerDevice *, void *)
 	CaptureMode mode = CaptureMode::Off;
 	AcquireSRWLockExclusive(&capture_lock);
 	if (capture_mode == CaptureMode::Off) {
-		ResetCaptureSessionLocked();
 		capture_mode = CaptureMode::Backup;
 	} else {
 		capture_mode = CaptureMode::Off;
@@ -910,8 +912,6 @@ void ToggleAggressiveAssetHashCapture(HackerDevice *, void *)
 	if (capture_mode == CaptureMode::Aggressive) {
 		capture_mode = CaptureMode::Off;
 	} else {
-		if (capture_mode == CaptureMode::Off)
-			ResetCaptureSessionLocked();
 		capture_mode = CaptureMode::Aggressive;
 	}
 	mode = capture_mode;
@@ -944,8 +944,6 @@ void ToggleAssetHashPathConversion(HackerDevice *, void *)
 	if (capture_mode == CaptureMode::PathConversion) {
 		capture_mode = CaptureMode::Off;
 	} else {
-		if (capture_mode == CaptureMode::Off)
-			ResetCaptureSessionLocked();
 		capture_mode = CaptureMode::PathConversion;
 	}
 	mode = capture_mode;
@@ -978,8 +976,6 @@ void ToggleAssetHashCleanPathConversion(HackerDevice *, void *)
 	if (capture_mode == CaptureMode::CleanPathConversion) {
 		capture_mode = CaptureMode::Off;
 	} else {
-		if (capture_mode == CaptureMode::Off)
-			ResetCaptureSessionLocked();
 		capture_mode = CaptureMode::CleanPathConversion;
 	}
 	mode = capture_mode;
@@ -1047,7 +1043,8 @@ void RefreshAssetHashCaptureSources()
 	}
 
 	AcquireSRWLockExclusive(&capture_lock);
-	ResetCaptureSessionLocked();
+	if (capture_mode == CaptureMode::Off)
+		ResetCaptureSessionLocked();
 	source_files = std::move(files);
 	watched_identities = std::move(identities);
 	watched_legacy_hashes = std::move(legacy_hashes);
@@ -1057,6 +1054,7 @@ void RefreshAssetHashCaptureSources()
 	if (capture_mode != CaptureMode::Off &&
 			(has_identity_aliases ||
 			 needs_canonicalization ||
+			 !target_source_file.empty() ||
 			 !captured_hashes.empty() ||
 			 !recent_assets.empty()))
 		capture_dirty = true;
@@ -1383,14 +1381,17 @@ std::string AssetHashCaptureDiagnosticsJson()
 {
 	std::string json;
 	AcquireSRWLockShared(&capture_lock);
-	char header[448];
+	char header[512];
 	sprintf_s(
 		header,
-		"\"mode\":%u,\"target_vb\":\"%08x\",\"target_vertices\":%u,"
+		"\"mode\":%u,\"workspace\":%llu,\"workspace_locked\":%s,"
+		"\"target_vb\":\"%08x\",\"target_vertices\":%u,"
 		"\"target_families\":%llu,\"vb_observations\":%llu,"
 		"\"shape_probes\":%llu,"
 		"\"shape_observations\":%llu,\"shape\":[",
 		static_cast<unsigned>(capture_mode),
+		static_cast<unsigned long long>(workspace_generation),
+		target_source_file.empty() ? "false" : "true",
 		target_vb_hash,
 		target_vertex_count,
 		static_cast<unsigned long long>(target_vb_hashes.size()),

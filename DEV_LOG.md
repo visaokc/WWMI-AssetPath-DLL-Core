@@ -1,5 +1,40 @@
 # DEV_LOG
 
+## 2026-08-21 - F10 workspace lifecycle and INI-wide write isolation
+
+- Workspace lifecycle: the target is now a persistent current-model/current-INI
+  workspace rather than a capture-mode-local selection. Turning an F7 mode off
+  stops observation but preserves the lock; changing or re-enabling an F7 mode
+  also preserves it. A config reload resets the workspace only while capture is
+  off. Therefore F10 during active capture reloads Mod data without allowing a
+  different controlled character to take over the session, while F7 OFF + F10
+  explicitly clears the old role for the next F7 lock.
+- Texture isolation: before this change the writer transformed texture
+  Path/Hash data across every loaded source INI and restricted only VB repair to
+  `target_source_file`. The writer now performs no disk transform before a
+  workspace is locked and skips every source other than that exact target INI.
+  Texture hashes, mip streams, Path conversion/cleanup, VB, Component,
+  ShapeKey, FoldHost, and LOD repair consequently share one write boundary.
+- Observation boundary: global bounded observations may still be staged before
+  the draw-signature lock so the current model can be repaired immediately, but
+  staged evidence cannot write or select another INI after the workspace lock.
+- Diagnostics: status JSON now exposes a monotonically changing `workspace`
+  generation and `workspace_locked`; generation changes only when an off-mode
+  config refresh clears the session.
+- Re-entry: enabling or changing an F7 mode and F10 reload while locked marks
+  the retained workspace dirty even when no new texture observation arrived,
+  so the selected write mode is applied to the already-captured VB and texture
+  evidence without requiring a new unique draw.
+- Verification: a new static lifecycle contract requires off-mode-only reset,
+  forbids reset inside all four F7 toggles, requires the unlocked and non-target
+  writer gates to execute before texture transformation, and requires workspace
+  diagnostics. All native document tests and capture wakeup, Draw Debug,
+  agent-control, and release-INI contracts pass. `Release|x64` rebuilt with 212
+  pre-existing warnings and zero errors; DLL SHA256 is
+  `B0638E8A55FDE6DA8870E2986FAF5FD1787C10832766A7252CA362FC36073916`.
+- Installation: pending game exit. The running game still uses the prior DLL;
+  no live INI was manually edited.
+
 ## 2026-08-21 - Mixed single-host and merged-host ShapeKey sizing
 
 - Runtime diagnosis: Daniya Path Cleanup correctly selected current VB
