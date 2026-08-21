@@ -32,8 +32,12 @@
   agent-control, and release-INI contracts pass. `Release|x64` rebuilt with 212
   pre-existing warnings and zero errors; DLL SHA256 is
   `B0638E8A55FDE6DA8870E2986FAF5FD1787C10832766A7252CA362FC36073916`.
-- Installation: pending game exit. The running game still uses the prior DLL;
-  no live INI was manually edited.
+- Installation: after confirming the game process was absent, the verified DLL
+  was installed to `D:\WWMI\d3d11.dll`. The previous DLL plus `d3dx.ini`,
+  YangYang `mod.ini`, and Daniya `mod.ini` were backed up under
+  `D:\WWMI\Backups\WorkspaceIsolation-20260821-130748`. Post-install hashes
+  confirm all three live INIs remained byte-identical; the intentionally stale
+  Daniya hash remains available for fresh in-game acceptance.
 
 ## 2026-08-21 - Mixed single-host and merged-host ShapeKey sizing
 
