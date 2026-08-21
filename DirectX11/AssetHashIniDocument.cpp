@@ -2220,6 +2220,43 @@ std::wstring TransformVbHashIniDocument(
 				++scale_matches;
 			}
 		}
+		if (!offsets_matches && !scale_matches && selected_target_family &&
+				shape_host_counts[roots.first.first] == 1) {
+			uint32_t paired_offsets = 0;
+			uint32_t paired_scale = 0;
+			size_t paired_matches = 0;
+			for (const auto& offsets_resource : shape_resources) {
+				if (offsets_resource.second.ambiguous_width ||
+						offsets_resource.second.stages != 3 ||
+						!offsets_resource.second.uav0 ||
+						offsets_resource.second.byte_width % 24 ||
+						claimed_offsets.find(offsets_resource.first) !=
+							claimed_offsets.end())
+					continue;
+				uint32_t inferred_count =
+					offsets_resource.second.byte_width / 24;
+				for (const auto& scale_resource : shape_resources) {
+					if (scale_resource.first == offsets_resource.first ||
+							scale_resource.second.ambiguous_width ||
+							scale_resource.second.stages != 3 ||
+							!scale_resource.second.uav1 ||
+							scale_resource.second.byte_width % 4 ||
+							claimed_scales.find(scale_resource.first) !=
+								claimed_scales.end() ||
+							scale_resource.second.byte_width / 4 != inferred_count)
+						continue;
+					paired_offsets = offsets_resource.first;
+					paired_scale = scale_resource.first;
+					++paired_matches;
+				}
+			}
+			if (paired_matches == 1) {
+				current_offsets = paired_offsets;
+				current_scale = paired_scale;
+				offsets_matches = 1;
+				scale_matches = 1;
+			}
+		}
 		if (offsets_matches != 1 || scale_matches != 1) {
 			target_shape_roots_resolved = false;
 			continue;

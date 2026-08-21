@@ -1,5 +1,29 @@
 # DEV_LOG
 
+## 2026-08-21 - Unique ShapeKey pair fallback across Yangyang mod topologies
+
+- Runtime diagnosis: the newly selected Yangyang INI locked the correct
+  workspace and native VB `efd45ce3` with `65173` vertices, but the active
+  ShapeKey pair `1a646636` / `6fe81411` had byte widths corresponding to
+  `78034` vertices while the mod declared a merged mesh count of `414525`.
+  The single-host native-count gate therefore rejected the complete document,
+  leaving its stale VB `15fb50a9` and ShapeKey hashes unchanged.
+- Fix: when neither the selected native VB count nor the configured mod mesh
+  count matches, a selected single-host family may use an inferred ShapeKey
+  pair only if exactly one complete UAV0/UAV1 pair was observed at both 3333
+  and 4444 stages and both byte widths imply the same vertex count. Multiple
+  inferred pairs remain an atomic rejection, and merged multi-host routing
+  keeps its existing claimed-resource and configured-count rules.
+- Regression coverage: added the live `65173` / `414525` / `78034` mismatch
+  shape as a passing fixture and a two-pair ambiguity fixture that must preserve
+  the entire document. Native document, workspace lifecycle, capture wakeup,
+  Draw Debug, and agent-control tests pass.
+- Build: `Release|x64` completed with 212 pre-existing warnings and zero
+  errors. DLL SHA256 is
+  `7298A0460936787396D4FF17BD100BF6EBF7EC4369BDA76733D8F759072F9DB6`.
+- Installation: pending game exit. The running game and live Yangyang INI were
+  used only for diagnostics and were not modified by this source build.
+
 ## 2026-08-21 - F10 workspace lifecycle and INI-wide write isolation
 
 - Workspace lifecycle: the target is now a persistent current-model/current-INI
