@@ -859,6 +859,40 @@ void TestVbRangeAndShapeKeyReplacementUsesUniqueStructure()
 		"the uniquely sized ShapeKey scale buffer must update without markers");
 }
 
+void TestSelectedSingleVbCountOverridesConfiguredModMeshCount()
+{
+	const std::wstring source =
+		L"[Constants]\r\n"
+		L"global $mesh_vertex_count_ib0 = 2000\r\n\r\n" +
+		VbSourceDocument() +
+		L"\r\n[TextureOverrideShapeKeyOffsets_ib0]\r\n"
+		L"hash = 7fe8c94e\r\n"
+		L"\r\n[TextureOverrideShapeKeyScale_ib0]\r\n"
+		L"hash = 81378bbb\r\n";
+	const VbHashObservationList vb_observations = {
+		{L"/Game/Test/Body.Body", 0x11111111, 144069, 83268, 1000},
+		{L"/Game/Test/Shared.Shared", 0x11111111, 227337, 34740, 1000}};
+	const ShapeKeyHashObservationList shape_observations = {
+		{0x1a646636, 24000, 0, 3333, 0, true},
+		{0x1a646636, 24000, 0, 4444, 0, true},
+		{0x6fe81411, 4000, 0, 3333, 1, true},
+		{0x6fe81411, 4000, 0, 4444, 1, true}};
+	const std::wstring updated = TransformVbHashIniDocument(
+		source,
+		vb_observations,
+		shape_observations,
+		true,
+		0x11111111,
+		1000,
+		{0x11111111});
+	Require(
+		Count(updated, L"hash = 1a646636") == 1 &&
+			Count(updated, L"hash = 6fe81411") == 1 &&
+			updated.find(L"hash = 7fe8c94e") == std::wstring::npos &&
+			updated.find(L"hash = 81378bbb") == std::wstring::npos,
+		"the locked single-VB native count must override the mod mesh count");
+}
+
 void TestVbRangeReplacementRejectsTwoContiguousCandidates()
 {
 	const VbHashObservationList observations = {
@@ -1100,7 +1134,7 @@ void TestMergedShapeKeyRootsUseVariableCountAndPreserveObservedHostPair()
 		L"[TextureOverrideShapeKeyScale_22222222_ib0]\r\n"
 		L"hash = dddddddd\r\n";
 	const VbHashObservationList vb_observations = {
-		{L"", 0x11111111, 0, 100, 123}};
+		{L"", 0x11111111, 0, 100, 1000}};
 	const ShapeKeyHashObservationList shape_observations = {
 		{0xaaaaaaaa, 24000, 0, 3333, 0, true},
 		{0xaaaaaaaa, 24000, 0, 4444, 0, true},
@@ -1116,7 +1150,7 @@ void TestMergedShapeKeyRootsUseVariableCountAndPreserveObservedHostPair()
 		shape_observations,
 		true,
 		0x11111111,
-		123);
+		1000);
 	Require(
 		updated == source,
 		"an observed active host pair must remain valid beside same-sized merged host pairs");
@@ -1144,7 +1178,7 @@ void TestMergedShapeKeyRootExcludesPairsClaimedByOtherHosts()
 		L"[TextureOverrideShapeKeyScale_22222222_ib0]\r\n"
 		L"hash = dddddddd\r\n";
 	const VbHashObservationList vb_observations = {
-		{L"", 0x11111111, 0, 100, 123}};
+		{L"", 0x11111111, 0, 100, 1000}};
 	const ShapeKeyHashObservationList shape_observations = {
 		{0xaaaaaaaa, 24000, 0, 3333, 0, true},
 		{0xaaaaaaaa, 24000, 0, 4444, 0, true},
@@ -1160,7 +1194,7 @@ void TestMergedShapeKeyRootExcludesPairsClaimedByOtherHosts()
 		shape_observations,
 		true,
 		0x11111111,
-		123,
+		1000,
 		{0x11111111});
 	Require(
 		updated.find(L"hash = aaaaaaaa") != std::wstring::npos &&
@@ -1192,6 +1226,7 @@ int main()
 	TestFirstPassGeneratedPathCanRepairVbFamily();
 	TestVbHashReplacementRejectsAmbiguity();
 	TestVbRangeAndShapeKeyReplacementUsesUniqueStructure();
+	TestSelectedSingleVbCountOverridesConfiguredModMeshCount();
 	TestVbRangeReplacementRejectsTwoContiguousCandidates();
 	TestVbRangeReplacementWorksWhenHashIsUnchanged();
 	TestShapeKeyReplacementRejectsAmbiguousBufferSize();

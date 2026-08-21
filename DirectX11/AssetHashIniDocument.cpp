@@ -2134,13 +2134,13 @@ std::wstring TransformVbHashIniDocument(
 			continue;
 		uint64_t vertex_count = 0;
 		auto configured_count = mesh_vertex_counts.find(roots.first.first);
-		if (configured_count != mesh_vertex_counts.end()) {
-			vertex_count = configured_count->second;
-		} else if (selected_target_vertex_count &&
+		if (selected_target_vertex_count &&
 				(selected_target_hash == host_hash ||
 				 (family != replacements.end() &&
 				  family->second.hash == selected_target_hash))) {
 			vertex_count = selected_target_vertex_count;
+		} else if (configured_count != mesh_vertex_counts.end()) {
+			vertex_count = configured_count->second;
 		} else if (family != replacements.end()) {
 			vertex_count = family->second.vertex_count;
 		} else {

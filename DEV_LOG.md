@@ -1,5 +1,28 @@
 # DEV_LOG
 
+## 2026-08-21 - Restore selected single-VB ShapeKey authority
+
+- Regression: the multi-family ShapeKey sizing route preferred the INI's
+  configured `$mesh_vertex_count[_ibN]` before the native vertex count already
+  resolved for the locked primary VB. YangYang therefore captured the correct
+  `efd45ce3` host and `1a646636` / `6fe81411` buffers but sized them against the
+  mod mesh count `78034` instead of the authoritative native count `65173`, so
+  the atomic ambiguity gate rejected the document unchanged.
+- Fix: the initially selected single-VB family once again uses
+  `selected_target_vertex_count` first. Additional multi-family hosts still use
+  their per-IB configured counts, preserving the Daniya route.
+- Regression coverage: added a selected single-VB fixture whose configured mod
+  mesh count intentionally differs from its native count. Existing single-VB,
+  multi-family, ShapeKey isolation, capture wakeup, Draw Debug, agent-control,
+  and release-INI tests pass. A replay against the live YangYang document and
+  current diagnostics produces all seven VB replacements, three offsets
+  replacements, and one scale replacement with no old ShapeKey hashes left.
+- Build: `Release|x64` completed with 212 pre-existing warnings and zero errors.
+  DLL SHA256 is
+  `198C335C6F98321F9DBEC4BB561CF75A552049A57AEC282532CD2B372DABEE72`.
+- Installation: pending game exit; the running game continues to use the prior
+  DLL and no live INI was manually edited during diagnosis.
+
 ## 2026-08-21 - Target-INI multi-family capture
 
 - Scope: extend the established current-model repair route from one selected
