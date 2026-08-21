@@ -20,8 +20,13 @@
 - Build: `Release|x64` completed with 212 pre-existing warnings and zero errors.
   DLL SHA256 is
   `198C335C6F98321F9DBEC4BB561CF75A552049A57AEC282532CD2B372DABEE72`.
-- Installation: pending game exit; the running game continues to use the prior
-  DLL and no live INI was manually edited during diagnosis.
+- Installation: after confirming the game process was absent, the verified DLL
+  was installed to `D:\WWMI\d3d11.dll`; source and destination hashes match.
+  The previous DLL, `d3dx.ini`, and the live YangYang and Daniya INIs were
+  backed up unchanged at
+  `D:\WWMI\Backups\SingleVbAuthorityFix-20260821-111036`. Live INI hashes
+  matched their backups after installation. Runtime YangYang acceptance remains
+  pending the next game launch and F7 trigger.
 
 ## 2026-08-21 - Target-INI multi-family capture
 
