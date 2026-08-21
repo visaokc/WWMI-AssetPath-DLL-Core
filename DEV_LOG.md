@@ -25,8 +25,13 @@
   Debug, agent-control, and release-INI contracts pass. `Release|x64` rebuilt
   with 212 pre-existing warnings and zero errors; DLL SHA256 is
   `CFE10081F6C971A5E559F5DFAE6D833CBC317757FB688A0352BA6469CDBA0BA2`.
-- Installation: pending game exit. The earlier topology-specific build
-  `7298A046...` will not be installed.
+- Installation: after confirming the game process was absent, the unified DLL
+  was installed to `D:\WWMI\d3d11.dll`. The previous DLL, `d3dx.ini`, the
+  active Yangyang INI, and the Daniya INI were backed up under
+  `D:\WWMI\Backups\UnifiedShapeAssignment-20260821-142353`. Post-install
+  hashes confirm all three INIs remained byte-identical, preserving their
+  current states for fresh runtime acceptance. The earlier topology-specific
+  build `7298A046...` was not installed.
 
 ## 2026-08-21 - Unique ShapeKey pair fallback across Yangyang mod topologies
 
